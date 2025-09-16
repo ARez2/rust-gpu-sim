@@ -126,12 +126,7 @@ fn maybe_watch(
     {
         use std::path::PathBuf;
 
-        let crate_name = match options.shader {
-            RustGPUShader::Simplest => "simplest-shader",
-            RustGPUShader::Sky => "sky-shader",
-            RustGPUShader::Compute => "compute-shader",
-            RustGPUShader::Mouse => "mouse-shader",
-        };
+        let crate_name = "mouse-shader";
         let manifest_dir = env!("CARGO_MANIFEST_DIR");
         let crate_path = [manifest_dir, "..", "shaders", crate_name]
             .iter()

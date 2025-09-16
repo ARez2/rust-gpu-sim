@@ -3,6 +3,7 @@ name = "simulation"
 version = "0.0.0"
 publish = false
 edition = "2024"
+default-run = "simulation"
 
 [lints]
 workspace = true
