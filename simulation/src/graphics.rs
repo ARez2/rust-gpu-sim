@@ -88,8 +88,16 @@ async fn run(
     window: Window,
     compiled_shader_modules: CompiledShaderModules,
 ) {
-    let backends =
-        wgpu::Backends::from_env().unwrap_or(wgpu::Backends::VULKAN | wgpu::Backends::METAL);
+    // FIXME(eddyb) should this just use `wgpu::Backends::PRIMARY`?
+    // (that also enables the DirectX 12 backend, not sure we want that one?)
+
+    // #[cfg(target_arch = "wasm32")]
+    // let backends = wgpu::Backends::BROWSER_WEBGPU;
+    // #[cfg(not(target_arch = "wasm32"))]
+    // let backends =
+    //     wgpu::Backends::from_env().unwrap_or(wgpu::Backends::VULKAN | wgpu::Backends::METAL);
+    let backends = wgpu::Backends::from_env()
+        .unwrap_or(wgpu::Backends::VULKAN | wgpu::Backends::METAL | wgpu::Backends::BROWSER_WEBGPU);
     let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
         backends,
         ..Default::default()
@@ -224,8 +232,7 @@ async fn run(
             .as_ref()
             .err()
             .map(|(_, layout, _)| layout)
-            .as_ref()
-            .map_or(&[], slice::from_ref),
+            .as_slice(),
         push_constant_ranges: push_constants_or_rossbo_emulation
             .as_ref()
             .map_or(&[], slice::from_ref),
@@ -640,10 +647,11 @@ pub fn start(
             use winit::platform::web::WindowExtWebSys;
             // On wasm, append the canvas to the document body
             web_sys::window()
-                .and_then(|win| win.document())
-                .and_then(|doc| doc.body())
-                .and_then(|body| {
-                    body.append_child(&web_sys::Element::from(window.canvas()))
+                .and_then(|dom_window| {
+                    dom_window
+                        .document()?
+                        .body()?
+                        .append_child(&web_sys::Element::from(window.canvas()?))
                         .ok()
                 })
                 .expect("couldn't append canvas to document body");

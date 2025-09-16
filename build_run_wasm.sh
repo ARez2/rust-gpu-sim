@@ -1,0 +1,1 @@
+cargo run-wasm --package simulation
