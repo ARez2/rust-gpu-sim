@@ -29,6 +29,7 @@ strum = { version = "0.27.2", default-features = false, features = [
 bytemuck = "1.6.3"
 cargo-gpu = { git = "https://github.com/rust-gpu/cargo-gpu" }
 
+
 [target.'cfg(not(any(target_os = "android", target_arch = "wasm32")))'.dependencies]
 env_logger = "0.11.0"
 # spirv-builder = { workspace = true, features = ["watch"] }
@@ -43,3 +44,7 @@ web-sys = "0.3.60"
 console_error_panic_hook = "0.1.6"
 console_log = "1.0.0"
 wasm-bindgen-futures = "0.4.18"
+
+
+[build-dependencies]
+cargo-gpu = { git = "https://github.com/rust-gpu/cargo-gpu" }

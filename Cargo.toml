@@ -1,7 +1,7 @@
 [workspace]
 version = "0.0.0"
 publish = false
-members = ["simulation", "shaders/mouse-shader"]
+members = ["simulation", "shaders/mouse-shader", "run-wasm"]
 resolver = "3"
 
 

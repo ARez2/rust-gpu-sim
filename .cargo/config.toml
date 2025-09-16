@@ -1,0 +1,6 @@
+[alias]
+#run-wasm = ["run", "--release", "-p", "run-wasm", "--"]
+run-wasm = "run --release --package run-wasm --"
+
+[target.'cfg(target_arch = "wasm32")']
+rustflags = ["--cfg=web_sys_unstable_apis"]
