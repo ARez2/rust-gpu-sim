@@ -1,0 +1,15 @@
+[workspace]
+version = "0.0.0"
+publish = false
+members = ["simulation", "shaders/mouse-shader"]
+resolver = "3"
+
+
+[workspace.lints.rust]
+unexpected_cfgs = { level = "allow", check-cfg = [
+    'cfg(target_arch, values("spirv"))',
+] }
+
+[workspace.dependencies]
+# spirv-builder = { git = "https://github.com/Rust-GPU/rust-gpu" }
+spirv-std = { git = "https://github.com/Rust-GPU/rust-gpu" }
