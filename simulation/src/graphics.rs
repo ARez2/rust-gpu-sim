@@ -9,7 +9,7 @@ use winit::{
     window::Window,
 };
 
-#[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
+#[cfg(not(target_arch = "wasm32"))]
 mod shaders {
     // The usual usecase of code generation is always building in build.rs, and so the codegen
     // always happens. However, we want to both test code generation (on android) and runtime
@@ -19,7 +19,7 @@ mod shaders {
     #[allow(non_upper_case_globals)]
     pub const main_vs: &str = "main_vs";
 }
-#[cfg(any(target_os = "android", target_arch = "wasm32"))]
+#[cfg(target_arch = "wasm32")]
 mod shaders {
     include!(concat!(env!("OUT_DIR"), "/entry_points.rs"));
 }
@@ -108,17 +108,10 @@ async fn run(
         preferred_format: wgpu::TextureFormat,
     }
 
-    // Wait for Resumed event on Android; the surface is only otherwise needed
-    // early to find an adapter that can render to this surface.
-    let initial_surface = if cfg!(target_os = "android") {
-        Err(SurfaceCreationPending {
-            preferred_format: wgpu::TextureFormat::Rgba8UnormSrgb,
-        })
-    } else {
-        Ok(instance
-            .create_surface(&window)
-            .expect("Failed to create surface from window"))
-    };
+    // the surface is only needed early to find an adapter that can render to this surface.
+    let initial_surface = Ok(instance
+        .create_surface(&window)
+        .expect("Failed to create surface from window"));
 
     let adapter = wgpu::util::initialize_adapter_from_env_or_default(
         &instance,
@@ -243,7 +236,7 @@ async fn run(
         &device,
         &pipeline_layout,
         surface_with_config.as_ref().map_or_else(
-            |pending| pending.preferred_format,
+            |pending: &SurfaceCreationPending| pending.preferred_format,
             |(_, surface_config)| surface_config.format.add_srgb_suffix(),
         ),
         compiled_shader_modules,
@@ -594,21 +587,10 @@ fn create_pipeline(
 }
 
 #[allow(clippy::match_wild_err_arm)]
-pub fn start(
-    #[cfg(target_os = "android")] android_app: winit::platform::android::activity::AndroidApp,
-    options: &Options,
-) {
+pub fn start(options: &Options) {
     let mut event_loop_builder = EventLoop::with_user_event();
     cfg_if::cfg_if! {
-        if #[cfg(target_os = "android")] {
-            android_logger::init_once(
-                android_logger::Config::default()
-                    .with_max_level("info".parse().unwrap()),
-            );
-
-            use winit::platform::android::EventLoopBuilderExtAndroid;
-            event_loop_builder.with_android_app(android_app);
-        } else if #[cfg(target_arch = "wasm32")] {
+        if #[cfg(target_arch = "wasm32")] {
             std::panic::set_hook(Box::new(console_error_panic_hook::hook));
             console_log::init().expect("could not initialize logger");
         } else {
@@ -620,7 +602,7 @@ pub fn start(
     // Build the shader before we pop open a window, since it might take a while.
     let initial_shader = maybe_watch(
         options,
-        #[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
+        #[cfg(not(target_arch = "wasm32"))]
         {
             let proxy = event_loop.create_proxy();
             Some(Box::new(move |res| match proxy.send_event(res) {

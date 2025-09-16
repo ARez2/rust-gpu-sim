@@ -18,7 +18,7 @@ futures = { version = "0.3", default-features = false, features = [
 ] }
 # Vulkan SDK or MoltenVK needs to be installed for `vulkan-portability` to work on macOS
 wgpu = { version = "26.0.1", features = ["spirv", "vulkan-portability"] }
-winit = { version = "0.30.0", features = ["android-native-activity", "rwh_05"] }
+winit = { version = "0.30.0", features = ["rwh_05"] }
 clap = { version = "4", features = ["derive"] }
 strum = { version = "0.27.2", default-features = false, features = [
     "std",
@@ -27,15 +27,11 @@ strum = { version = "0.27.2", default-features = false, features = [
 bytemuck = "1.6.3"
 
 
-[target.'cfg(not(any(target_os = "android", target_arch = "wasm32")))'.dependencies]
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 cargo-gpu = { git = "https://github.com/rust-gpu/cargo-gpu" }
 env_logger = "0.11.0"
 # spirv-builder = { workspace = true, features = ["watch"] }
 
-[target.'cfg(target_os = "android")'.dependencies]
-android_logger = "0.15.1"
-# NOTE(eddyb) `winit` feature `android-native-activity` is always enabled above,
-# to avoid specifying the dependency twice, but only applies to android builds.
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 web-sys = { version = "0.3.78", features = ["Performance"] }
