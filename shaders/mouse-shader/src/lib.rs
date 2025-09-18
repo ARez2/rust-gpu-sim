@@ -21,11 +21,12 @@ pub fn main_fs(
 ) {
     let frag_coord = vec2(in_frag_coord.x, in_frag_coord.y);
     let ifrag_coord = frag_coord.as_uvec2();
-    let y = ifrag_coord.y;
-    let x = ifrag_coord.x;
-    let cell = sim_state[(y * params.width + x) as usize];
+    let y = ifrag_coord.y.min(params.sim_height - 1);
+    let x = ifrag_coord.x.min(params.sim_width - 1);
+    let cell = sim_state[(y * params.sim_width + x) as usize];
     let uv = frag_coord / vec2(1920.0, 1080.0);
     *output = cell.material.color();
+    //*output = vec4(frag_coord.x / 1280.0, frag_coord.y / 720.0, 0.0, 1.0);
 }
 
 #[spirv(vertex)]

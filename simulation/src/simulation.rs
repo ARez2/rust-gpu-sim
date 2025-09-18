@@ -6,11 +6,11 @@ use shared::{
 };
 use wgpu::{
     BindGroup, BindGroupEntry, BindGroupLayout, BindGroupLayoutEntry, Buffer, ComputePipeline,
-    Device, PipelineLayout, PushConstantRange, QuerySet, Queue, Sampler, Texture, TextureView,
-    util::DeviceExt,
+    Device, PipelineLayout, PushConstantRange, QuerySet, Queue, Sampler,
+    ShaderModuleDescriptorPassthrough, Texture, TextureView, util::DeviceExt,
 };
 
-use crate::CompiledShaderModules;
+use crate::{CompiledShaderModules, load_spirv_module};
 
 pub struct Simulation {
     sim_width: u32,
@@ -34,17 +34,25 @@ impl Simulation {
         device: &Device,
         queue: &Queue,
         timestamping: bool,
-        options: &crate::Options,
-        compiled_shader_modules: &CompiledShaderModules,
+        emulate_push_constants_with_storage_buffer: bool,
+        spirv_passthrough: bool,
         push_constant_data: (BindGroupLayoutEntry, &Buffer, &Vec<PushConstantRange>),
     ) -> Self {
-        // FIXME(eddyb) automate this decision by default.
-        let module = compiled_shader_modules.spv_module_for_entry_point("compute-shader");
-        let module = if options.force_spirv_passthru {
+        // #[cfg(not(target_arch = "wasm32"))]
+        // let shader_reload = {
+        //     let proxy = event_loop.create_proxy();
+        //     Some(Box::new(move |res| match proxy.send_event(res) {
+        //         Ok(it) => it,
+        //         // ShaderModuleDescriptor is not `Debug`, so can't use unwrap/expect
+        //         Err(_err) => panic!("Event loop dead"),
+        //     }))
+        // };
+        let module = crate::compile_and_watch("compute-shader", spirv_passthrough, None);
+        let shader_module = if spirv_passthrough {
             unsafe {
-                device.create_shader_module_passthrough(
-                    wgpu::ShaderModuleDescriptorPassthrough::SpirV(module),
-                )
+                device.create_shader_module_passthrough(ShaderModuleDescriptorPassthrough::SpirV(
+                    module,
+                ))
             }
         } else {
             let wgpu::ShaderModuleDescriptorSpirV { label, source } = module;
@@ -62,7 +70,7 @@ impl Simulation {
 
         let mut bind_group_layout_entries = vec![];
         let mut bind_group_entries = vec![];
-        if options.emulate_push_constants_with_storage_buffer {
+        if emulate_push_constants_with_storage_buffer {
             bind_group_layout_entries.push(push_constant_data.0);
             bind_group_entries.push(wgpu::BindGroupEntry {
                 binding: BIND_SHADER_PARAMS_WORKAROUND,
@@ -140,7 +148,7 @@ impl Simulation {
             cache: None,
             label: None,
             layout: Some(&pipeline_layout),
-            module: &module,
+            module: &shader_module,
             entry_point: Some("main_cs"),
         });
 
@@ -150,7 +158,7 @@ impl Simulation {
         ];
         for y in (sim_height - 100)..(sim_height - 50) {
             for x in (sim_width - 100)..(sim_width - 50) {
-                input[(y * sim_width + x) as usize] =
+                input[(100 * sim_width + x) as usize] =
                     shared::Cell::new_material(shared::Material::Sand);
             }
         }
@@ -226,8 +234,7 @@ impl Simulation {
             // output_img_tex,
             // output_img_view,
             // output_img_sampler,
-            emulate_push_constants_with_storage_buffer: options
-                .emulate_push_constants_with_storage_buffer,
+            emulate_push_constants_with_storage_buffer,
             bind_group,
             bind_group_layout,
             compute_pipeline,

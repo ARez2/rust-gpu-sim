@@ -1,13 +1,18 @@
 use clap::Parser;
 use clap::ValueEnum;
 use std::borrow::Cow;
+use std::path::PathBuf;
 use strum::{Display, EnumString};
+use winit::application::ApplicationHandler;
+use winit::event_loop::EventLoop;
+
+use crate::application::Application;
 
 // NOTE(eddyb) while this could theoretically work on the web, it needs more work.
 // #[cfg(not(target_arch = "wasm32"))]
 // mod compute;
 
-mod graphics;
+mod application;
 mod simulation;
 
 #[derive(Debug, EnumString, Display, PartialEq, Eq, Copy, Clone, ValueEnum)]
@@ -45,28 +50,24 @@ impl CompiledShaderModules {
     }
 }
 
-fn maybe_watch(
-    options: &Options,
+fn compile_and_watch(
+    shader_crate_name: &str,
+    spirv_passthrough: bool,
     #[cfg(not(target_arch = "wasm32"))] on_watch: Option<
-        Box<dyn FnMut(CompiledShaderModules) + Send + 'static>,
+        Box<dyn FnMut(wgpu::ShaderModuleDescriptorSpirV<'static>) + Send + 'static>,
     >,
-) -> CompiledShaderModules {
+) -> wgpu::ShaderModuleDescriptorSpirV<'static> {
     #[cfg(not(target_arch = "wasm32"))]
     {
         use std::path::PathBuf;
 
-        let crate_name = match options.shader {
-            RustGPUShader::Compute => "compute-shader",
-            RustGPUShader::Mouse => "mouse-shader",
-            _ => unreachable!(),
-        };
         let manifest_dir = env!("CARGO_MANIFEST_DIR");
-        let crate_path = [manifest_dir, "..", "shaders", crate_name]
+        let crate_path = [manifest_dir, "..", "shaders", shader_crate_name]
             .iter()
             .copied()
             .collect::<PathBuf>();
 
-        let has_debug_printf = options.force_spirv_passthru;
+        let has_debug_printf = spirv_passthrough;
 
         let builder = cargo_gpu::Install::from_shader_crate(crate_path.clone())
             .run()
@@ -84,36 +85,24 @@ fn maybe_watch(
             });
 
         fn handle_compile_result(
-            crate_name: String,
             compile_result: cargo_gpu::spirv_builder::CompileResult,
-        ) -> CompiledShaderModules {
-            let load_spv_module = |path| {
-                let data = std::fs::read(path).unwrap();
-                // FIXME(eddyb) this reallocates all the data pointlessly, there is
-                // not a good reason to use `ShaderModuleDescriptorSpirV` specifically.
-                let spirv = Cow::Owned(wgpu::util::make_spirv_raw(&data).into_owned());
-                wgpu::ShaderModuleDescriptorSpirV {
-                    label: None,
-                    source: spirv,
+        ) -> wgpu::ShaderModuleDescriptorSpirV<'static> {
+            match compile_result.module {
+                cargo_gpu::spirv_builder::ModuleResult::SingleModule(path) => {
+                    load_spirv_module(path)
                 }
-            };
-            CompiledShaderModules {
-                named_spv_modules: match compile_result.module {
-                    cargo_gpu::spirv_builder::ModuleResult::SingleModule(path) => {
-                        vec![(Some(crate_name), load_spv_module(path))]
-                    }
-                    cargo_gpu::spirv_builder::ModuleResult::MultiModule(modules) => modules
-                        .into_iter()
-                        .map(|(name, path)| (Some(name), load_spv_module(path)))
-                        .collect(),
-                },
+                cargo_gpu::spirv_builder::ModuleResult::MultiModule(_modules) => unreachable!(),
+                // modules
+                //     .into_iter()
+                //     .map(|(name, path)| load_spirv_module(path))
+                //     .collect()
             }
         }
 
         if let Some(mut f) = on_watch {
             builder
                 .watch(move |compile_result, accept| {
-                    let modules = handle_compile_result(crate_name.to_string(), compile_result);
+                    let modules = handle_compile_result(compile_result);
                     if let Some(accept) = accept {
                         accept.submit(modules);
                     } else {
@@ -123,7 +112,7 @@ fn maybe_watch(
                 .expect("Configuration is correct for watching")
                 .unwrap()
         } else {
-            handle_compile_result(crate_name.to_string(), builder.build().unwrap())
+            handle_compile_result(builder.build().unwrap())
         }
     }
     #[cfg(target_arch = "wasm32")]
@@ -147,6 +136,17 @@ fn maybe_watch(
     }
 }
 
+fn load_spirv_module(path: PathBuf) -> wgpu::ShaderModuleDescriptorSpirV<'static> {
+    let data = std::fs::read(path).unwrap();
+    // FIXME(eddyb) this reallocates all the data pointlessly, there is
+    // not a good reason to use `ShaderModuleDescriptorSpirV` specifically.
+    let spirv = Cow::Owned(wgpu::util::make_spirv_raw(&data).into_owned());
+    wgpu::ShaderModuleDescriptorSpirV {
+        label: None,
+        source: spirv,
+    }
+}
+
 #[derive(Parser, Clone)]
 #[command()]
 pub struct Options {
@@ -162,8 +162,10 @@ pub struct Options {
     emulate_push_constants_with_storage_buffer: bool,
 }
 
-fn main() {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut options = Options::parse();
+    let event_loop = EventLoop::new()?;
+    let mut app = Application::default();
 
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -190,5 +192,6 @@ fn main() {
         options.emulate_push_constants_with_storage_buffer = true;
     }
 
-    graphics::start(&options);
+    event_loop.set_control_flow(winit::event_loop::ControlFlow::Poll);
+    event_loop.run_app(&mut app).map_err(Into::into)
 }

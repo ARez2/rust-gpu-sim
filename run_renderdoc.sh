@@ -1,0 +1,1 @@
+WAYLAND_DISPLAY= XDG_SESSION_TYPE=x11 ~/Applications/renderdoc_1.40/bin/qrenderdoc

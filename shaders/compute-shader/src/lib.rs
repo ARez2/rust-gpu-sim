@@ -47,7 +47,6 @@ pub fn main_cs(
             shared[local_idx] = Cell::new_empty();
         }
     }
-    shared[local_idx] = Cell::new_material(Material::Empty);
 
     workgroup_barrier();
 
