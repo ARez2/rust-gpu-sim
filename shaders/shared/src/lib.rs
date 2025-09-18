@@ -2,21 +2,29 @@
 
 #![cfg_attr(target_arch = "spirv", no_std)]
 
+use bytemuck::{Pod, Zeroable};
 use core::f32::consts::PI;
-use glam::{Vec3, vec3};
-
+use glam::{Vec3, Vec4, vec3, vec4};
 pub use spirv_std::glam;
-
 // Note: This cfg is incorrect on its surface, it really should be "are we compiling with std", but
 // we tie #[no_std] above to the same condition, so it's fine.
 #[cfg(target_arch = "spirv")]
 use spirv_std::num_traits::Float;
 
-use bytemuck::{Pod, Zeroable};
+// this binding is used when the SSBO workaround for push constants is used
+pub const BIND_SHADER_PARAMS_WORKAROUND: u32 = 0;
+pub const BIND_SIM_INPUT: u32 = 1;
+pub const BIND_SIM_OUTPUT: u32 = 2;
+pub const BIND_SIM_OUTPUT_IMG: u32 = 3;
+
+pub const BIND_FRAG_TEX: u32 = 1;
+pub const BIND_FRAG_SAMPLER: u32 = 2;
+
+pub const SIM_TILE_SIZE: u32 = 16;
 
 #[derive(Copy, Clone, Pod, Zeroable)]
 #[repr(C)]
-pub struct ShaderConstants {
+pub struct ShaderParams {
     pub width: u32,
     pub height: u32,
     pub time: f32,
@@ -65,4 +73,36 @@ pub fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
     let x = saturate((x - edge0) / (edge1 - edge0));
     // Evaluate polynomial
     x * x * (3.0 - 2.0 * x)
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Zeroable)]
+pub struct Cell {
+    pub material: Material,
+}
+impl Cell {
+    pub fn new_empty() -> Self {
+        Self {
+            material: Material::Empty,
+        }
+    }
+
+    pub fn new_material(material: Material) -> Self {
+        Self { material }
+    }
+}
+unsafe impl bytemuck::Pod for Cell {}
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Zeroable)]
+pub enum Material {
+    Empty,
+    Sand,
+}
+impl Material {
+    pub fn color(&self) -> Vec4 {
+        match self {
+            Self::Empty => vec4(0.0, 0.0, 0.0, 1.0),
+            Self::Sand => vec4(1.0, 1.0, 0.0, 1.0),
+        }
+    }
 }

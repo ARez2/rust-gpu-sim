@@ -1,7 +1,8 @@
-use crate::{CompiledShaderModules, Options, maybe_watch};
+use crate::{CompiledShaderModules, Options, maybe_watch, simulation::Simulation};
+use simulation::PortableInstant;
 use wgpu::ShaderModuleDescriptorPassthrough;
 
-use shared::ShaderConstants;
+use shared::{BIND_SHADER_PARAMS_WORKAROUND, ShaderParams};
 use std::slice;
 use winit::{
     event::{ElementState, Event, MouseButton, WindowEvent},
@@ -22,53 +23,6 @@ mod shaders {
 #[cfg(target_arch = "wasm32")]
 mod shaders {
     include!(concat!(env!("OUT_DIR"), "/entry_points.rs"));
-}
-
-/// Abstraction for getting timestamps even when `std::time` isn't supported.
-enum PortableInstant {
-    #[cfg(not(target_arch = "wasm32"))]
-    Native(std::time::Instant),
-
-    #[cfg(target_arch = "wasm32")]
-    Web {
-        performance_timestamp_ms: f64,
-
-        // HACK(eddyb) cached `window().performance()` to speed up/simplify `elapsed`.
-        cached_window_performance: web_sys::Performance,
-    },
-}
-
-impl PortableInstant {
-    fn now() -> Self {
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            Self::Native(std::time::Instant::now())
-        }
-        #[cfg(target_arch = "wasm32")]
-        {
-            let performance = web_sys::window()
-                .expect("missing window")
-                .performance()
-                .expect("missing window.performance");
-            Self::Web {
-                performance_timestamp_ms: performance.now(),
-                cached_window_performance: performance,
-            }
-        }
-    }
-
-    fn elapsed_secs_f32(&self) -> f32 {
-        match self {
-            #[cfg(not(target_arch = "wasm32"))]
-            Self::Native(instant) => instant.elapsed().as_secs_f32(),
-
-            #[cfg(target_arch = "wasm32")]
-            Self::Web {
-                performance_timestamp_ms,
-                cached_window_performance,
-            } => ((cached_window_performance.now() - performance_timestamp_ms) / 1000.0) as f32,
-        }
-    }
 }
 
 fn mouse_button_index(button: MouseButton) -> usize {
@@ -121,7 +75,16 @@ async fn run(
     .await
     .expect("Failed to find an appropriate adapter");
 
+    // Timestamping may not be supported
+    let timestamping = adapter.features().contains(wgpu::Features::TIMESTAMP_QUERY)
+        && adapter
+            .features()
+            .contains(wgpu::Features::TIMESTAMP_QUERY_INSIDE_PASSES);
     let mut required_features = wgpu::Features::PUSH_CONSTANTS;
+    if timestamping {
+        required_features |=
+            wgpu::Features::TIMESTAMP_QUERY | wgpu::Features::TIMESTAMP_QUERY_INSIDE_PASSES;
+    };
     if options.force_spirv_passthru {
         required_features |= wgpu::Features::SPIRV_SHADER_PASSTHROUGH;
     }
@@ -167,7 +130,7 @@ async fn run(
         // NOTE(eddyb) VSync was disabled in the past, but without VSync,
         // especially for simpler shaders, you can easily hit thousands
         // of frames per second, stressing GPUs for no reason.
-        surface_config.present_mode = wgpu::PresentMode::AutoVsync;
+        surface_config.present_mode = wgpu::PresentMode::Fifo;
 
         surface.configure(device, &surface_config);
 
@@ -176,59 +139,92 @@ async fn run(
     let mut surface_with_config = initial_surface
         .map(|surface| auto_configure_surface(&adapter, &device, surface, window.inner_size()));
 
-    // Describe the pipeline layout and build the initial pipeline.
-    let push_constants_or_rossbo_emulation = {
-        const PUSH_CONSTANTS_SIZE: usize = std::mem::size_of::<ShaderConstants>();
-        let stages = wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT;
+    //
+    let mut bind_group_layout_entries = vec![];
+    let mut bind_group_entries = vec![];
+    const PUSH_CONSTANTS_SIZE: usize = std::mem::size_of::<ShaderParams>();
+    let stages =
+        wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE;
 
-        if !options.emulate_push_constants_with_storage_buffer {
-            Ok(wgpu::PushConstantRange {
-                stages,
-                range: 0..PUSH_CONSTANTS_SIZE as u32,
-            })
-        } else {
-            let buffer = device.create_buffer(&wgpu::BufferDescriptor {
-                label: None,
-                size: PUSH_CONSTANTS_SIZE as u64,
-                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            });
-            let binding0 = wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: stages,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: true },
-                    has_dynamic_offset: false,
-                    min_binding_size: Some((PUSH_CONSTANTS_SIZE as u64).try_into().unwrap()),
-                },
-                count: None,
-            };
-            let bind_group_layout =
-                device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                    label: None,
-                    entries: &[binding0],
-                });
-            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: None,
-                layout: &bind_group_layout,
-                entries: &[wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: buffer.as_entire_binding(),
-                }],
-            });
-            Err((buffer, bind_group_layout, bind_group))
-        }
+    let push_constants_ssbo_workaround = device.create_buffer(&wgpu::BufferDescriptor {
+        label: None,
+        size: PUSH_CONSTANTS_SIZE as u64,
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    let ssbo_entry = wgpu::BindGroupLayoutEntry {
+        binding: BIND_SHADER_PARAMS_WORKAROUND,
+        visibility: stages,
+        ty: wgpu::BindingType::Buffer {
+            ty: wgpu::BufferBindingType::Storage { read_only: true },
+            has_dynamic_offset: false,
+            min_binding_size: Some((PUSH_CONSTANTS_SIZE as u64).try_into().unwrap()),
+        },
+        count: None,
     };
+    let push_constant_ranges = if options.emulate_push_constants_with_storage_buffer {
+        vec![]
+    } else {
+        vec![wgpu::PushConstantRange {
+            stages,
+            range: 0..PUSH_CONSTANTS_SIZE as u32,
+        }]
+    };
+
+    //
+    let simulation = Simulation::new(
+        &device,
+        &queue,
+        timestamping,
+        &options,
+        &compiled_shader_modules,
+        (
+            ssbo_entry,
+            &push_constants_ssbo_workaround,
+            &push_constant_ranges,
+        ),
+    );
+    //
+
+    if options.emulate_push_constants_with_storage_buffer {
+        bind_group_layout_entries.push(ssbo_entry);
+        bind_group_entries.push(wgpu::BindGroupEntry {
+            binding: BIND_SHADER_PARAMS_WORKAROUND,
+            resource: push_constants_ssbo_workaround.as_entire_binding(),
+        });
+    };
+
+    bind_group_layout_entries.push(wgpu::BindGroupLayoutEntry {
+        binding: 1,
+        count: None,
+        visibility: stages,
+        ty: wgpu::BindingType::Buffer {
+            has_dynamic_offset: false,
+            min_binding_size: None,
+            ty: wgpu::BufferBindingType::Storage { read_only: true },
+        },
+    });
+
+    //
+    let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: None,
+        entries: &bind_group_layout_entries,
+    });
+
+    bind_group_entries.push(wgpu::BindGroupEntry {
+        binding: 1,
+        resource: simulation.output_buffer.as_entire_binding(),
+    });
+    let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: None,
+        layout: &bind_group_layout,
+        entries: &bind_group_entries,
+    });
+
     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: None,
-        bind_group_layouts: push_constants_or_rossbo_emulation
-            .as_ref()
-            .err()
-            .map(|(_, layout, _)| layout)
-            .as_slice(),
-        push_constant_ranges: push_constants_or_rossbo_emulation
-            .as_ref()
-            .map_or(&[], slice::from_ref),
+        bind_group_layouts: &[&bind_group_layout],
+        push_constant_ranges: &push_constant_ranges,
     });
 
     let mut render_pipeline = create_pipeline(
@@ -243,13 +239,20 @@ async fn run(
     );
 
     let start = PortableInstant::now();
-
-    let (mut cursor_x, mut cursor_y) = (0.0, 0.0);
-    let (mut drag_start_x, mut drag_start_y) = (0.0, 0.0);
-    let (mut drag_end_x, mut drag_end_y) = (0.0, 0.0);
-    let mut mouse_button_pressed = 0;
     let mut mouse_button_press_since_last_frame = 0;
-    let mut mouse_button_press_time = [f32::NEG_INFINITY; 3];
+    let mut params = ShaderParams {
+        width: window.inner_size().width,
+        height: window.inner_size().height,
+        time: 0.0,
+        cursor_x: 0.0,
+        cursor_y: 0.0,
+        drag_start_x: 0.0,
+        drag_start_y: 0.0,
+        drag_end_x: 0.0,
+        drag_end_y: 0.0,
+        mouse_button_pressed: 0,
+        mouse_button_press_time: [f32::NEG_INFINITY; 3],
+    };
 
     // FIXME(eddyb) incomplete `winit` upgrade, follow the guides in:
     // https://github.com/rust-windowing/winit/releases/tag/v0.30.0
@@ -261,7 +264,7 @@ async fn run(
         let _ = (&instance, &adapter, &pipeline_layout);
         let render_pipeline = &mut render_pipeline;
 
-        event_loop_window_target.set_control_flow(ControlFlow::Wait);
+        event_loop_window_target.set_control_flow(ControlFlow::Poll);
         match event {
             Event::Resumed => {
                 // Avoid holding onto to multiple surfaces at the same time
@@ -316,12 +319,10 @@ async fn run(
                 event: WindowEvent::RedrawRequested,
                 ..
             } => {
-                // FIXME(eddyb) only the mouse shader *really* needs this, could
-                // avoid doing wasteful rendering by special-casing each shader?
-                // (with VSync enabled this can't be *too* bad, thankfully)
                 // FIXME(eddyb) is this the best way to do continuous redraws in
                 // `winit`? (or should we stop using `ControlFlow::Wait`? etc.)
                 window.request_redraw();
+                simulation.execute(&device, &queue, &params);
 
                 if let Ok((surface, surface_config)) = &mut surface_with_config {
                     let output = match surface.get_current_texture() {
@@ -363,44 +364,29 @@ async fn run(
                         });
 
                         let time = start.elapsed_secs_f32();
-                        for (i, press_time) in mouse_button_press_time.iter_mut().enumerate() {
+                        for (i, press_time) in params.mouse_button_press_time.iter_mut().enumerate() {
                             if (mouse_button_press_since_last_frame & (1 << i)) != 0 {
                                 *press_time = time;
                             }
                         }
                         mouse_button_press_since_last_frame = 0;
-
-                        let push_constants = ShaderConstants {
-                            width: window.inner_size().width,
-                            height: window.inner_size().height,
-                            time,
-                            cursor_x,
-                            cursor_y,
-                            drag_start_x,
-                            drag_start_y,
-                            drag_end_x,
-                            drag_end_y,
-                            mouse_button_pressed,
-                            mouse_button_press_time,
-                        };
-
+                        rpass.set_bind_group(0, Some(&bind_group), &[]);
                         rpass.set_pipeline(render_pipeline);
                         let (push_constant_offset, push_constant_bytes) =
-                            (0, bytemuck::bytes_of(&push_constants));
-                        match &push_constants_or_rossbo_emulation {
-                            Ok(_) => rpass.set_push_constants(
-                                wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
-                                push_constant_offset as u32,
-                                push_constant_bytes,
-                            ),
-                            Err((buffer, _, bind_group)) => {
+                            (0, bytemuck::bytes_of(&params));
+                        match options.emulate_push_constants_with_storage_buffer {
+                            true => {
                                 queue.write_buffer(
-                                    buffer,
+                                    &push_constants_ssbo_workaround,
                                     push_constant_offset,
                                     push_constant_bytes,
                                 );
-                                rpass.set_bind_group(0, bind_group, &[]);
-                            }
+                            },
+                            false => rpass.set_push_constants(
+                                stages,
+                                push_constant_offset as u32,
+                                push_constant_bytes,
+                            )
                         }
                         rpass.draw(0..3, 0..1);
                     }
@@ -431,28 +417,28 @@ async fn run(
                 let mask = 1 << mouse_button_index(button);
                 match state {
                     ElementState::Pressed => {
-                        mouse_button_pressed |= mask;
+                        params.mouse_button_pressed |= mask;
                         mouse_button_press_since_last_frame |= mask;
 
                         if button == MouseButton::Left {
-                            drag_start_x = cursor_x;
-                            drag_start_y = cursor_y;
-                            drag_end_x = cursor_x;
-                            drag_end_y = cursor_y;
+                            params.drag_start_x = params.cursor_x;
+                            params.drag_start_y = params.cursor_y;
+                            params.drag_end_x = params.cursor_x;
+                            params.drag_end_y = params.cursor_y;
                         }
                     }
-                    ElementState::Released => mouse_button_pressed &= !mask,
+                    ElementState::Released => params.mouse_button_pressed &= !mask,
                 }
             }
             Event::WindowEvent {
                 event: WindowEvent::CursorMoved { position, .. },
                 ..
             } => {
-                cursor_x = position.x as f32;
-                cursor_y = position.y as f32;
-                if (mouse_button_pressed & (1 << mouse_button_index(MouseButton::Left))) != 0 {
-                    drag_end_x = cursor_x;
-                    drag_end_y = cursor_y;
+                params.cursor_x = position.x as f32;
+                params.cursor_y = position.y as f32;
+                if (params.mouse_button_pressed & (1 << mouse_button_index(MouseButton::Left))) != 0 {
+                    params.drag_end_x = params.cursor_x;
+                    params.drag_end_y = params.cursor_y;
                 }
             }
             Event::UserEvent(new_module) => {
@@ -532,8 +518,8 @@ fn create_pipeline(
     let vs_entry_point = shaders::main_vs;
     let fs_entry_point = shaders::main_fs;
 
-    let vs_module_descr = compiled_shader_modules.spv_module_for_entry_point(vs_entry_point);
-    let fs_module_descr = compiled_shader_modules.spv_module_for_entry_point(fs_entry_point);
+    let vs_module_descr = compiled_shader_modules.spv_module_for_entry_point("mouse-shader");
+    let fs_module_descr = compiled_shader_modules.spv_module_for_entry_point("mouse-shader");
 
     // HACK(eddyb) avoid calling `device.create_shader_module` twice unnecessarily.
     let vs_fs_same_module = std::ptr::eq(&vs_module_descr.source[..], &fs_module_descr.source[..]);
@@ -600,7 +586,7 @@ pub fn start(options: &Options) {
     let event_loop = event_loop_builder.build().unwrap();
 
     // Build the shader before we pop open a window, since it might take a while.
-    let initial_shader = maybe_watch(
+    let fragment_shader = maybe_watch(
         options,
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -612,6 +598,27 @@ pub fn start(options: &Options) {
             }))
         },
     );
+    let mut options2 = options.clone();
+    options2.shader = crate::RustGPUShader::Compute;
+    let compute_shader = maybe_watch(
+        &options2,
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let proxy = event_loop.create_proxy();
+            Some(Box::new(move |res| match proxy.send_event(res) {
+                Ok(it) => it,
+                // ShaderModuleDescriptor is not `Debug`, so can't use unwrap/expect
+                Err(_err) => panic!("Event loop dead"),
+            }))
+        },
+    );
+    let shaders = CompiledShaderModules {
+        named_spv_modules: fragment_shader
+            .named_spv_modules
+            .into_iter()
+            .chain(compute_shader.named_spv_modules)
+            .collect(),
+    };
 
     // FIXME(eddyb) incomplete `winit` upgrade, follow the guides in:
     // https://github.com/rust-windowing/winit/releases/tag/v0.30.0
@@ -641,14 +648,14 @@ pub fn start(options: &Options) {
                 options.clone(),
                 event_loop,
                 window,
-                initial_shader,
+                shaders,
             ));
         } else {
             futures::executor::block_on(run(
                 options.clone(),
                 event_loop,
                 window,
-                initial_shader,
+                shaders,
             ));
         }
     }

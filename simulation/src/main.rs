@@ -4,10 +4,11 @@ use std::borrow::Cow;
 use strum::{Display, EnumString};
 
 // NOTE(eddyb) while this could theoretically work on the web, it needs more work.
-#[cfg(not(target_arch = "wasm32"))]
-mod compute;
+// #[cfg(not(target_arch = "wasm32"))]
+// mod compute;
 
 mod graphics;
+mod simulation;
 
 #[derive(Debug, EnumString, Display, PartialEq, Eq, Copy, Clone, ValueEnum)]
 pub enum RustGPUShader {
@@ -18,7 +19,7 @@ pub enum RustGPUShader {
 }
 
 struct CompiledShaderModules {
-    named_spv_modules: Vec<(Option<String>, wgpu::ShaderModuleDescriptorSpirV<'static>)>,
+    pub named_spv_modules: Vec<(Option<String>, wgpu::ShaderModuleDescriptorSpirV<'static>)>,
 }
 
 impl CompiledShaderModules {
@@ -54,14 +55,16 @@ fn maybe_watch(
     {
         use std::path::PathBuf;
 
-        let crate_name = "mouse-shader";
+        let crate_name = match options.shader {
+            RustGPUShader::Compute => "compute-shader",
+            RustGPUShader::Mouse => "mouse-shader",
+            _ => unreachable!(),
+        };
         let manifest_dir = env!("CARGO_MANIFEST_DIR");
         let crate_path = [manifest_dir, "..", "shaders", crate_name]
             .iter()
             .copied()
             .collect::<PathBuf>();
-
-        println!("{}", crate_path.display());
 
         let has_debug_printf = options.force_spirv_passthru;
 
@@ -81,6 +84,7 @@ fn maybe_watch(
             });
 
         fn handle_compile_result(
+            crate_name: String,
             compile_result: cargo_gpu::spirv_builder::CompileResult,
         ) -> CompiledShaderModules {
             let load_spv_module = |path| {
@@ -96,7 +100,7 @@ fn maybe_watch(
             CompiledShaderModules {
                 named_spv_modules: match compile_result.module {
                     cargo_gpu::spirv_builder::ModuleResult::SingleModule(path) => {
-                        vec![(None, load_spv_module(path))]
+                        vec![(Some(crate_name), load_spv_module(path))]
                     }
                     cargo_gpu::spirv_builder::ModuleResult::MultiModule(modules) => modules
                         .into_iter()
@@ -109,7 +113,7 @@ fn maybe_watch(
         if let Some(mut f) = on_watch {
             builder
                 .watch(move |compile_result, accept| {
-                    let modules = handle_compile_result(compile_result);
+                    let modules = handle_compile_result(crate_name.to_string(), compile_result);
                     if let Some(accept) = accept {
                         accept.submit(modules);
                     } else {
@@ -119,12 +123,11 @@ fn maybe_watch(
                 .expect("Configuration is correct for watching")
                 .unwrap()
         } else {
-            handle_compile_result(builder.build().unwrap())
+            handle_compile_result(crate_name.to_string(), builder.build().unwrap())
         }
     }
     #[cfg(target_arch = "wasm32")]
     {
-        println!("{:?}", options.shader);
         // let module = match options.shader {
         //     RustGPUShader::Simplest => {
         //         wgpu::include_spirv_raw!(env!("simplest_shader.spv"))
@@ -175,9 +178,9 @@ fn main() {
             std::env::set_var("PROFILE", env!("PROFILE"));
         }
 
-        if options.shader == RustGPUShader::Compute {
-            return compute::start(&options);
-        }
+        // if options.shader == RustGPUShader::Compute {
+        //     return compute::start(&options);
+        // }
     }
 
     // HACK(eddyb) force push constant emulation using (read-only) SSBOs, on

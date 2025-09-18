@@ -1,7 +1,10 @@
 [workspace]
-version = "0.0.0"
-publish = false
-members = ["simulation", "shaders/mouse-shader", "run-wasm"]
+members = [
+    "simulation",
+    "shaders/mouse-shader",
+    "shaders/compute-shader",
+    "run-wasm",
+]
 resolver = "3"
 
 
@@ -11,5 +14,4 @@ unexpected_cfgs = { level = "allow", check-cfg = [
 ] }
 
 [workspace.dependencies]
-# spirv-builder = { git = "https://github.com/Rust-GPU/rust-gpu" }
-spirv-std = { git = "https://github.com/Rust-GPU/rust-gpu" }
+spirv-std = { git = "https://github.com/Rust-GPU/rust-gpu", rev = "de03e8d8c997c68aed1a950863c0d79ba9bd8c72" }

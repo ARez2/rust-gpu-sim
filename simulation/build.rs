@@ -9,7 +9,14 @@ fn main() -> Result<(), Box<dyn Error>> {
     let profile = env::var("PROFILE").unwrap();
     println!("cargo:rustc-env=PROFILE={profile}");
 
-    build_shader("../shaders/mouse-shader", true)?;
+    if let Ok(dir) = std::fs::read_dir("../shaders/") {
+        for entry in dir.flatten() {
+            let path = entry.path();
+            if path.is_dir() && !path.to_str().unwrap().ends_with("shared") {
+                let _ = build_shader(path.to_str().unwrap(), true);
+            }
+        }
+    }
     Ok(())
 }
 
