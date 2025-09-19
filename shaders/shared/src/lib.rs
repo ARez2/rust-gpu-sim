@@ -2,14 +2,8 @@
 
 #![cfg_attr(target_arch = "spirv", no_std)]
 
-use bytemuck::{Pod, Zeroable};
-use core::f32::consts::PI;
-use glam::{Vec3, Vec4, vec3, vec4};
 pub use spirv_std::glam;
-// Note: This cfg is incorrect on its surface, it really should be "are we compiling with std", but
-// we tie #[no_std] above to the same condition, so it's fine.
-#[cfg(target_arch = "spirv")]
-use spirv_std::num_traits::Float;
+use spirv_std::glam::USizeVec2;
 
 // this binding is used when the SSBO workaround for push constants is used
 pub const BIND_SHADER_PARAMS_WORKAROUND: u32 = 0;
@@ -20,112 +14,91 @@ pub const BIND_SIM_OUTPUT_IMG: u32 = 3;
 pub const BIND_FRAG_TEX: u32 = 1;
 pub const BIND_FRAG_SAMPLER: u32 = 2;
 
-pub const SIM_TILE_SIZE: u32 = 16;
+pub const SIM_TILE_SIZE: usize = 16;
+const TILE_SIZE_VEC: USizeVec2 = USizeVec2::new(SIM_TILE_SIZE, SIM_TILE_SIZE);
 
-#[derive(Copy, Clone, Pod, Zeroable)]
-#[repr(C)]
-pub struct ShaderParams {
-    pub width: u32,
-    pub height: u32,
-    pub sim_width: u32,
-    pub sim_height: u32,
-    pub time: f32,
-    pub frame: u32,
+pub type Tile = [Cell; SIM_TILE_SIZE * SIM_TILE_SIZE];
+pub type Pos = USizeVec2;
 
-    pub cursor_x: f32,
-    pub cursor_y: f32,
-    pub drag_start_x: f32,
-    pub drag_start_y: f32,
-    pub drag_end_x: f32,
-    pub drag_end_y: f32,
+mod helpers;
+pub use helpers::*;
 
-    /// Bit mask of the pressed buttons (0 = Left, 1 = Middle, 2 = Right).
-    pub mouse_button_pressed: u32,
+mod params;
+pub use params::*;
 
-    /// The last time each mouse button (Left, Middle or Right) was pressed,
-    /// or `f32::NEG_INFINITY` for buttons which haven't been pressed yet.
-    ///
-    /// If this is the first frame after the press of some button, that button's
-    /// entry in `mouse_button_press_time` will exactly equal `time`.
-    pub mouse_button_press_time: [f32; 3],
-}
-impl Default for ShaderParams {
-    fn default() -> Self {
-        Self {
-            width: 0,
-            height: 0,
-            sim_width: 512,
-            sim_height: 512,
-            time: 0.0,
-            frame: 0,
-            cursor_x: 0.0,
-            cursor_y: 0.0,
-            drag_start_x: 0.0,
-            drag_start_y: 0.0,
-            drag_end_x: 0.0,
-            drag_end_y: 0.0,
-            mouse_button_pressed: 0,
-            mouse_button_press_time: [f32::NEG_INFINITY; 3],
-        }
-    }
+mod material;
+pub use material::*;
+
+mod cell;
+pub use cell::*;
+
+/// Converts a 2D pos to a 1D index
+#[inline(always)]
+pub fn pos_to_idx(pos: Pos) -> usize {
+    pos.y * SIM_TILE_SIZE + pos.x
 }
 
-pub fn saturate(x: f32) -> f32 {
-    x.clamp(0.0, 1.0)
+#[inline(always)]
+pub fn clamp_pos(pos: Pos) -> Pos {
+    // No need for >= 0 check since its unsigned
+    pos.min(TILE_SIZE_VEC - 1)
 }
 
-pub fn pow(v: Vec3, power: f32) -> Vec3 {
-    vec3(v.x.powf(power), v.y.powf(power), v.z.powf(power))
-}
-
-pub fn exp(v: Vec3) -> Vec3 {
-    vec3(v.x.exp(), v.y.exp(), v.z.exp())
-}
-
-/// Based on: <https://seblagarde.wordpress.com/2014/12/01/inverse-trigonometric-functions-gpu-optimization-for-amd-gcn-architecture/>
-pub fn acos_approx(v: f32) -> f32 {
-    let x = v.abs();
-    let mut res = -0.155972 * x + 1.56467; // p(x)
-    res *= (1.0f32 - x).sqrt();
-
-    if v >= 0.0 { res } else { PI - res }
-}
-
-pub fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
-    // Scale, bias and saturate x to 0..1 range
-    let x = saturate((x - edge0) / (edge1 - edge0));
-    // Evaluate polynomial
-    x * x * (3.0 - 2.0 * x)
+#[inline(always)]
+pub fn clamp_idx(idx: usize) -> usize {
+    idx.min(SIM_TILE_SIZE - 1 * SIM_TILE_SIZE + SIM_TILE_SIZE - 1)
 }
 
 #[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Zeroable)]
-pub struct Cell {
-    pub material: Material,
+pub enum Offset {
+    Up,
+    Left,
+    Right,
+    UpRight,
+    DownRight,
+    DownLeft,
+    UpLeft,
+    Down,
 }
-impl Cell {
-    pub fn new_empty() -> Self {
-        Self {
-            material: Material::Empty,
-        }
-    }
-
-    pub fn new_material(material: Material) -> Self {
-        Self { material }
-    }
-}
-unsafe impl bytemuck::Pod for Cell {}
-#[repr(u32)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Zeroable)]
-pub enum Material {
-    Empty,
-    Sand,
-}
-impl Material {
-    pub fn color(&self) -> Vec4 {
+impl Offset {
+    pub fn tuple(&self) -> (i32, i32) {
         match self {
-            Self::Empty => vec4(0.0, 0.0, 0.0, 1.0),
-            Self::Sand => vec4(1.0, 1.0, 0.0, 1.0),
+            Self::Up => (0, -1),
+            Self::Left => (-1, 0),
+            Self::Right => (1, 0),
+            Self::UpRight => (1, -1),
+            Self::DownRight => (1, -1),
+            Self::DownLeft => (-1, 1),
+            Self::UpLeft => (-1, -1),
+            Self::Down => (0, 1),
         }
     }
+}
+
+pub fn get_pos(mut pos: Pos, offset: Offset) -> Pos {
+    let (x, y) = offset.tuple();
+    if x < 0 {
+        pos.x -= ((-x) as usize).min(pos.x);
+    } else {
+        pos.x += x as usize;
+    }
+    if y < 0 {
+        pos.y -= ((-y) as usize).min(pos.y);
+    } else {
+        pos.y += y as usize;
+    }
+    clamp_pos(pos)
+}
+pub fn get_pos_custom(mut pos: Pos, x: i32, y: i32) -> Pos {
+    if x < 0 {
+        pos.x -= ((-x) as usize).min(pos.x);
+    } else {
+        pos.x += x as usize;
+    }
+    if y < 0 {
+        pos.y -= ((-y) as usize).min(pos.y);
+    } else {
+        pos.y += y as usize;
+    }
+    clamp_pos(pos)
 }
