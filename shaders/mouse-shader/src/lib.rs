@@ -20,13 +20,27 @@ pub fn main_fs(
     output: &mut Vec4,
 ) {
     let frag_coord = vec2(in_frag_coord.x, in_frag_coord.y);
-    let ifrag_coord = frag_coord.as_uvec2();
-    let y = ifrag_coord.y.min(params.sim_height - 1);
-    let x = ifrag_coord.x.min(params.sim_width - 1);
-    let cell = sim_state[(y * params.sim_width + x) as usize];
-    let uv = frag_coord / vec2(1920.0, 1080.0);
+    // Normalize to [0,1] range across the window
+    let uv = frag_coord / vec2(params.width as f32, params.height as f32);
+
+    let pos = 2.0 * uv - Vec2::ONE;
+
+    // Scale into simulation space
+    let sim_x = (uv.x * params.sim_width as f32).floor() as u32;
+    let sim_y = (uv.y * params.sim_height as f32).floor() as u32;
+
+    // Clamp to valid indices
+    let x = sim_x.min(params.sim_width - 1);
+    let y = sim_y.min(params.sim_height - 1);
+
+    // Fetch cell from 1D array
+    let idx = (y * params.sim_width + x) as usize;
+    let cell = sim_state[idx];
+
+    // Output its color
     *output = cell.material.color();
-    //*output = vec4(frag_coord.x / 1280.0, frag_coord.y / 720.0, 0.0, 1.0);
+    //*output = Vec3::splat(idx as f32 / (sim_state.len()) as f32).extend(1.0);
+    // *output = vec4(pos.x, pos.y, 0.0, 1.0);
 }
 
 #[spirv(vertex)]

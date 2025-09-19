@@ -65,7 +65,7 @@ impl Application {
     ) -> Result<(), Box<dyn Error>> {
         let window_attributes = WindowAttributes::default()
             .with_title("Rust GPU - wgpu")
-            .with_inner_size(LogicalSize::new(1280.0, 720.0));
+            .with_inner_size(LogicalSize::new(512.0, 512.0));
         let window_box = event_loop.create_window(window_attributes)?;
         let mut instance_flags = wgpu::InstanceFlags::default();
         // Turn off validation as the shaders are trusted.
@@ -157,8 +157,7 @@ impl Application {
         let mut bind_group_layout_entries = vec![];
         let mut bind_group_entries = vec![];
         const PUSH_CONSTANTS_SIZE: usize = std::mem::size_of::<ShaderParams>();
-        let stages =
-            wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE;
+        let stages = wgpu::ShaderStages::VERTEX_FRAGMENT | wgpu::ShaderStages::COMPUTE;
 
         let push_constants_ssbo_workaround = device.create_buffer(&wgpu::BufferDescriptor {
             label: None,
@@ -191,11 +190,7 @@ impl Application {
             timestamping,
             emulate_push_constants_with_storage_buffer,
             spirv_passthrough,
-            (
-                ssbo_entry,
-                &push_constants_ssbo_workaround,
-                &push_constant_ranges,
-            ),
+            (ssbo_entry, &push_constants_ssbo_workaround),
         );
         if emulate_push_constants_with_storage_buffer {
             bind_group_layout_entries.push(ssbo_entry);
@@ -346,6 +341,8 @@ impl Application {
                     *press_time = time;
                 }
             }
+            self.params.time = time;
+            self.params.frame += 1;
             self.mouse_button_press_since_last_frame = 0;
             self.params.mouse_button_pressed = 0;
             rpass.set_bind_group(0, self.bind_group.as_ref(), &[]);

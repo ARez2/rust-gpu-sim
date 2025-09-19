@@ -30,6 +30,7 @@ pub struct ShaderParams {
     pub sim_width: u32,
     pub sim_height: u32,
     pub time: f32,
+    pub frame: u32,
 
     pub cursor_x: f32,
     pub cursor_y: f32,
@@ -56,6 +57,7 @@ impl Default for ShaderParams {
             sim_width: 512,
             sim_height: 512,
             time: 0.0,
+            frame: 0,
             cursor_x: 0.0,
             cursor_y: 0.0,
             drag_start_x: 0.0,

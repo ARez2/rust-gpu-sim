@@ -21,7 +21,9 @@ pub struct Simulation {
     // output_img_view: TextureView,
     // output_img_sampler: Sampler,
     emulate_push_constants_with_storage_buffer: bool,
-    bind_group: BindGroup,
+    bind_group_a: BindGroup,
+    bind_group_b: BindGroup,
+    current_bind_group_a: bool,
     bind_group_layout: BindGroupLayout,
     compute_pipeline: ComputePipeline,
     compute_pipeline_layout: PipelineLayout,
@@ -36,7 +38,7 @@ impl Simulation {
         timestamping: bool,
         emulate_push_constants_with_storage_buffer: bool,
         spirv_passthrough: bool,
-        push_constant_data: (BindGroupLayoutEntry, &Buffer, &Vec<PushConstantRange>),
+        push_constant_data: (BindGroupLayoutEntry, &Buffer),
     ) -> Self {
         // #[cfg(not(target_arch = "wasm32"))]
         // let shader_reload = {
@@ -65,14 +67,11 @@ impl Simulation {
         let sim_width = 512;
         let sim_height = 512;
 
-        const PUSH_CONSTANTS_SIZE: usize = std::mem::size_of::<ShaderParams>();
-        let compute_stage = wgpu::ShaderStages::COMPUTE;
-
         let mut bind_group_layout_entries = vec![];
-        let mut bind_group_entries = vec![];
+        let mut bind_group_entries_a = vec![];
         if emulate_push_constants_with_storage_buffer {
             bind_group_layout_entries.push(push_constant_data.0);
-            bind_group_entries.push(wgpu::BindGroupEntry {
+            bind_group_entries_a.push(wgpu::BindGroupEntry {
                 binding: BIND_SHADER_PARAMS_WORKAROUND,
                 resource: push_constant_data.1.as_entire_binding(),
             });
@@ -80,7 +79,7 @@ impl Simulation {
         bind_group_layout_entries.push(wgpu::BindGroupLayoutEntry {
             binding: BIND_SIM_INPUT,
             count: None,
-            visibility: compute_stage,
+            visibility: wgpu::ShaderStages::COMPUTE,
             ty: wgpu::BindingType::Buffer {
                 has_dynamic_offset: false,
                 min_binding_size: None,
@@ -90,7 +89,7 @@ impl Simulation {
         bind_group_layout_entries.push(wgpu::BindGroupLayoutEntry {
             binding: BIND_SIM_OUTPUT,
             count: None,
-            visibility: compute_stage,
+            visibility: wgpu::ShaderStages::COMPUTE,
             ty: wgpu::BindingType::Buffer {
                 has_dynamic_offset: false,
                 min_binding_size: None,
@@ -137,10 +136,19 @@ impl Simulation {
             entries: &bind_group_layout_entries,
         });
 
+        const PUSH_CONSTANTS_SIZE: usize = std::mem::size_of::<ShaderParams>();
+        let push_constant_ranges = if emulate_push_constants_with_storage_buffer {
+            &vec![]
+        } else {
+            &vec![wgpu::PushConstantRange {
+                stages: wgpu::ShaderStages::COMPUTE,
+                range: 0..PUSH_CONSTANTS_SIZE as u32,
+            }]
+        };
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: None,
             bind_group_layouts: &[&bind_group_layout],
-            push_constant_ranges: &push_constant_data.2,
+            push_constant_ranges,
         });
 
         let compute_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
@@ -162,6 +170,7 @@ impl Simulation {
                     shared::Cell::new_material(shared::Material::Sand);
             }
         }
+        let output = input.clone();
 
         let input_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Input buffer"),
@@ -172,10 +181,43 @@ impl Simulation {
         });
         let output_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Output buffer"),
-            contents: bytemuck::cast_slice(&input),
+            contents: bytemuck::cast_slice(&output),
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
         });
         assert_eq!(input_buffer.size(), output_buffer.size());
+        // Create 2 bind groups to swap at runtime
+        let mut bind_group_entries_b = bind_group_entries_a.clone();
+        bind_group_entries_a.push(wgpu::BindGroupEntry {
+            binding: BIND_SIM_INPUT,
+            resource: input_buffer.as_entire_binding(),
+        });
+        bind_group_entries_a.push(wgpu::BindGroupEntry {
+            binding: BIND_SIM_OUTPUT,
+            resource: output_buffer.as_entire_binding(),
+        });
+        bind_group_entries_b.push(wgpu::BindGroupEntry {
+            binding: BIND_SIM_INPUT,
+            resource: output_buffer.as_entire_binding(),
+        });
+        bind_group_entries_b.push(wgpu::BindGroupEntry {
+            binding: BIND_SIM_OUTPUT,
+            resource: input_buffer.as_entire_binding(),
+        });
+
+        // bind_group_entries.push(wgpu::BindGroupEntry {
+        //     binding: BIND_SIM_OUTPUT_IMG,
+        //     resource: wgpu::BindingResource::TextureView(&output_img_view),
+        // });
+        let bind_group_a = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Bind group A"),
+            layout: &bind_group_layout,
+            entries: &bind_group_entries_a,
+        });
+        let bind_group_b = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Bind group B"),
+            layout: &bind_group_layout,
+            entries: &bind_group_entries_b,
+        });
 
         let timestamp_data = if timestamping {
             let timestamp_buffer = device.create_buffer(&wgpu::BufferDescriptor {
@@ -208,24 +250,6 @@ impl Simulation {
             None
         };
 
-        bind_group_entries.push(wgpu::BindGroupEntry {
-            binding: BIND_SIM_INPUT,
-            resource: input_buffer.as_entire_binding(),
-        });
-        bind_group_entries.push(wgpu::BindGroupEntry {
-            binding: BIND_SIM_OUTPUT,
-            resource: output_buffer.as_entire_binding(),
-        });
-        // bind_group_entries.push(wgpu::BindGroupEntry {
-        //     binding: BIND_SIM_OUTPUT_IMG,
-        //     resource: wgpu::BindingResource::TextureView(&output_img_view),
-        // });
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: None,
-            layout: &bind_group_layout,
-            entries: &bind_group_entries,
-        });
-
         Self {
             sim_width,
             sim_height,
@@ -235,7 +259,9 @@ impl Simulation {
             // output_img_view,
             // output_img_sampler,
             emulate_push_constants_with_storage_buffer,
-            bind_group,
+            bind_group_a,
+            bind_group_b,
+            current_bind_group_a: true,
             bind_group_layout,
             compute_pipeline,
             compute_pipeline_layout: pipeline_layout,
@@ -243,15 +269,22 @@ impl Simulation {
         }
     }
 
-    pub fn execute(&self, device: &Device, queue: &Queue, params: &ShaderParams) {
+    pub fn execute(&mut self, device: &Device, queue: &Queue, params: &ShaderParams) {
         let mut encoder =
             device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
         {
             let mut cpass = encoder.begin_compute_pass(&Default::default());
-            cpass.set_bind_group(0, &self.bind_group, &[]);
+
+            self.current_bind_group_a = !self.current_bind_group_a;
+            if self.current_bind_group_a {
+                cpass.set_bind_group(0, &self.bind_group_a, &[]);
+            } else {
+                cpass.set_bind_group(0, &self.bind_group_b, &[]);
+            }
+
             cpass.set_pipeline(&self.compute_pipeline);
-            if self.emulate_push_constants_with_storage_buffer {
+            if !self.emulate_push_constants_with_storage_buffer {
                 let (push_constant_offset, push_constant_bytes) = (0, bytemuck::bytes_of(params));
                 cpass.set_push_constants(push_constant_offset, push_constant_bytes);
             }
@@ -260,8 +293,10 @@ impl Simulation {
             {
                 cpass.write_timestamp(ts_queries, 0);
             }
-            let num_workgroups_x = self.sim_width / SIM_TILE_SIZE as u32;
-            let num_workgroups_y = self.sim_height / SIM_TILE_SIZE as u32;
+
+            let tile = SIM_TILE_SIZE as f32;
+            let num_workgroups_x = (self.sim_width as f32 / tile).ceil() as u32;
+            let num_workgroups_y = (self.sim_height as f32 / tile).ceil() as u32;
             cpass.dispatch_workgroups(num_workgroups_x, num_workgroups_y, 1);
             if let Some((_ts_buffer, _ts_readback_buffer, ts_queries, _ts_period)) =
                 &self.timestamp_data
@@ -269,14 +304,6 @@ impl Simulation {
                 cpass.write_timestamp(ts_queries, 1);
             }
         }
-
-        encoder.copy_buffer_to_buffer(
-            &self.output_buffer,
-            0,
-            &self.input_buffer,
-            0,
-            self.output_buffer.size(),
-        );
 
         if let Some((ts_buffer, ts_readback_buffer, ts_queries, _ts_period)) = &self.timestamp_data
         {
