@@ -3,7 +3,6 @@ use clap::ValueEnum;
 use std::borrow::Cow;
 use std::path::PathBuf;
 use strum::{Display, EnumString};
-use winit::application::ApplicationHandler;
 use winit::event_loop::EventLoop;
 
 use crate::application::Application;
@@ -21,33 +20,6 @@ pub enum RustGPUShader {
     Sky,
     Compute,
     Mouse,
-}
-
-struct CompiledShaderModules {
-    pub named_spv_modules: Vec<(Option<String>, wgpu::ShaderModuleDescriptorSpirV<'static>)>,
-}
-
-impl CompiledShaderModules {
-    fn spv_module_for_entry_point<'a>(
-        &'a self,
-        wanted_entry: &str,
-    ) -> wgpu::ShaderModuleDescriptorSpirV<'a> {
-        for (name, spv_module) in &self.named_spv_modules {
-            if name.as_ref().is_none_or(|name| name == wanted_entry) {
-                return wgpu::ShaderModuleDescriptorSpirV {
-                    label: name.as_deref(),
-                    source: Cow::Borrowed(&spv_module.source),
-                };
-            }
-        }
-        unreachable!(
-            "{wanted_entry:?} not found in modules {:?}",
-            self.named_spv_modules
-                .iter()
-                .map(|(name, _)| name)
-                .collect::<Vec<_>>()
-        );
-    }
 }
 
 fn compile_and_watch(

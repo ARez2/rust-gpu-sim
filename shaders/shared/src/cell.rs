@@ -5,12 +5,7 @@ use crate::Material;
 pub struct Cell {
     pub material: Material,
 }
-const CELL_UNDEF: Cell = Cell::UNDEFINED;
 impl Cell {
-    pub const UNDEFINED: Self = Self {
-        material: Material::Undefined,
-    };
-
     pub fn new_empty() -> Self {
         Self {
             material: Material::Empty,

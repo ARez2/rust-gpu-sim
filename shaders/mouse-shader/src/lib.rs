@@ -2,15 +2,37 @@
 // HACK(eddyb) can't easily see warnings otherwise from `spirv-builder` builds.
 //#![deny(warnings)]
 
-use core::f32::consts::PI;
-use glam::{Mat2, Vec2, Vec3, Vec4, Vec4Swizzles, vec2, vec3, vec4};
+#[allow(unused_imports)]
+use glam::{Vec2, Vec4, vec2, vec3, vec4};
 use shared::*;
 use spirv_std::spirv;
 
-// Note: This cfg is incorrect on its surface, it really should be "are we compiling with std", but
-// we tie #[no_std] above to the same condition, so it's fine.
-#[cfg(target_arch = "spirv")]
-use spirv_std::num_traits::Float;
+// // Cheap mipmap blur from Michael Moroz
+// // https://www.shadertoy.com/view/WsVGWV
+// float weight(float t, float log2radius, float gamma)
+// {
+//     return exp(-gamma*pow(log2radius-t,2.));
+// }
+
+// vec4 sampleBlurred(sampler2D ch, vec2 uv, float radius, float gamma)
+// {
+//     vec4 pix = vec4(0.);
+//     float norm = 0.;
+//     // Weighted integration over mipmap levels
+//     for(float i = 0.; i < 10.; i += 1.0)
+//     {
+//         float k = weight(i, log2(radius), gamma);
+//         pix += k*texture(ch, uv, i);
+//         norm += k;
+//     }
+
+//     return pix / norm;
+// }
+
+// float occ = sampleBlurred(iChannel0, fragCoord / RES, 16.0, 0.5).y;
+//     occ = saturate((1.0 - occ) / 0.25);
+
+//     col *= 0.2 + 0.8 * occ;
 
 #[spirv(fragment)]
 pub fn main_fs(

@@ -21,7 +21,6 @@ impl<'a> Grid<'a> {
         }
     }
 
-    #[inline(always)]
     pub fn clamp_pos(&self, own_pos: Pos, pos: Pos) -> Pos {
         let local_clamp = pos.min(SIM_TILE_SIZE_VEC - 1);
 
@@ -64,7 +63,7 @@ impl<'a> Grid<'a> {
 
     /// Moves a [`Cell`] from_pos to_pos. If swap == true, it will swap with the target
     /// position, instead of replacing it. This is faster and can be used for empty target cells.
-    pub fn move_cell(&mut self, from_pos: Pos, mut to_pos: Pos, swap: bool) {
+    pub fn move_cell(&mut self, from_pos: Pos, to_pos: Pos, swap: bool) {
         // spirv_std::arch::workgroup_memory_barrier();
         if from_pos == to_pos {
             return;

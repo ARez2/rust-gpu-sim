@@ -3,7 +3,7 @@
 #![cfg_attr(target_arch = "spirv", no_std)]
 
 pub use spirv_std::glam;
-use spirv_std::glam::{USizeVec2, UVec2};
+use spirv_std::glam::UVec2;
 
 // this binding is used when the SSBO workaround for push constants is used
 pub const BIND_SHADER_PARAMS_WORKAROUND: u32 = 0;

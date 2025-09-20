@@ -1,4 +1,4 @@
-use spirv_std::glam::{USizeVec2, UVec2};
+use spirv_std::glam::UVec2;
 
 use crate::MouseButtonPressed;
 

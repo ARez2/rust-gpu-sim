@@ -2,14 +2,8 @@ use std::{error::Error, time::Instant};
 
 use futures::executor::block_on;
 use ouroboros::self_referencing;
-use shared::{
-    BIND_SHADER_PARAMS_WORKAROUND, Cell, ShaderParams,
-    glam::{USizeVec2, UVec2},
-};
-use wgpu::{
-    BindGroup, Buffer, Device, InstanceDescriptor, ShaderModuleDescriptorPassthrough,
-    util::DeviceExt,
-};
+use shared::{BIND_SHADER_PARAMS_WORKAROUND, Cell, ShaderParams, glam::UVec2};
+use wgpu::{BindGroup, Buffer, Device, InstanceDescriptor, ShaderModuleDescriptorPassthrough};
 use winit::{
     application::ApplicationHandler,
     dpi::LogicalSize,
@@ -19,7 +13,7 @@ use winit::{
     window::{WindowAttributes, WindowId},
 };
 
-use crate::{load_spirv_module, simulation::Simulation};
+use crate::simulation::Simulation;
 
 #[self_referencing]
 struct WindowSurface {
@@ -440,14 +434,15 @@ impl ApplicationHandler for Application {
                     //if self.mouse_left_pressed {}
                 }
             }
-            WindowEvent::MouseWheel { delta, .. } => {
-                if let winit::event::MouseScrollDelta::LineDelta(x, y) = delta {
-                    self.params.mouse_radius = self
-                        .params
-                        .mouse_radius
-                        .saturating_add_signed(y as i32)
-                        .max(1);
-                }
+            WindowEvent::MouseWheel {
+                delta: winit::event::MouseScrollDelta::LineDelta(_x, y),
+                ..
+            } => {
+                self.params.mouse_radius = self
+                    .params
+                    .mouse_radius
+                    .saturating_add_signed(y as i32)
+                    .max(1);
             }
             WindowEvent::KeyboardInput { event, .. } => {
                 if event.logical_key == NamedKey::Escape && event.state == ElementState::Pressed {

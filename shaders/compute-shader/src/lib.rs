@@ -24,7 +24,7 @@ mod grid;
 use grid::Grid;
 
 // TODO: implement way to make sure that cells never move out of the tile (because even with shifting the tiles each frame, the shared memory is still that one tile)
-#[inline(always)]
+#[allow(clippy::needless_return)]
 fn cell_update(params: &ShaderParams, mut grid: Grid, _global_pos: Pos, pos: Pos, pos_idx: usize) {
     let cell = grid.get_idx(pos_idx);
 
@@ -67,7 +67,10 @@ fn cell_update(params: &ShaderParams, mut grid: Grid, _global_pos: Pos, pos: Pos
         if grid.clamp_pos(pos, diag_pos) == diag_pos {
             let diag_neigh = grid.get(diag_pos);
 
+            #[cfg(feature = "movable_solid_check_horizontal")]
             let mut extra_cond = true;
+            #[cfg(not(feature = "movable_solid_check_horizontal"))]
+            let extra_cond = true;
             #[cfg(feature = "movable_solid_check_horizontal")]
             {
                 extra_cond |= horiz_neigh_order[0].material.is_empty();
@@ -93,7 +96,7 @@ fn cell_update(params: &ShaderParams, mut grid: Grid, _global_pos: Pos, pos: Pos
 #[spirv(compute(threads(32, 32, 1)))]
 #[allow(clippy::too_many_arguments)]
 pub fn main_cs(
-    #[spirv(global_invocation_id)] gid: UVec3,
+    #[spirv(global_invocation_id)] _gid: UVec3,
     #[spirv(local_invocation_id)] lid: UVec3,
     #[spirv(workgroup_id)] wid: UVec3,
     #[spirv(push_constant)] params: &ShaderParams,
