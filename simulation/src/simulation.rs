@@ -2,6 +2,7 @@ use std::time::Duration;
 
 use shared::{
     BIND_SHADER_PARAMS_WORKAROUND, BIND_SIM_INPUT, BIND_SIM_OUTPUT, SIM_TILE_SIZE, ShaderParams,
+    glam::UVec2,
 };
 use wgpu::{
     BindGroup, BindGroupLayout, BindGroupLayoutEntry, Buffer, ComputePipeline, Device,
@@ -9,8 +10,7 @@ use wgpu::{
 };
 
 pub struct Simulation {
-    pub sim_width: u32,
-    pub sim_height: u32,
+    pub sim_size: UVec2,
     input_buffer: Buffer,
     output_buffer: Buffer,
     // output_img_tex: Texture,
@@ -34,6 +34,7 @@ impl Simulation {
         timestamping: bool,
         emulate_push_constants_with_storage_buffer: bool,
         spirv_passthrough: bool,
+        params: &ShaderParams,
         push_constant_data: (BindGroupLayoutEntry, &Buffer),
     ) -> Self {
         // #[cfg(not(target_arch = "wasm32"))]
@@ -59,9 +60,6 @@ impl Simulation {
                 source: wgpu::ShaderSource::SpirV(source),
             })
         };
-
-        let sim_width = 512;
-        let sim_height = 512;
 
         let mut bind_group_layout_entries = vec![];
         let mut bind_group_entries_a = vec![];
@@ -158,11 +156,11 @@ impl Simulation {
 
         let mut input = vec![
             shared::Cell::new_material(shared::Material::Empty);
-            sim_width as usize * sim_height as usize
+            params.sim_size.x as usize * params.sim_size.y as usize
         ];
         for y in 100..256 {
             for x in 100..400 {
-                input[(y * sim_width + x) as usize] =
+                input[(y * params.sim_size.x + x) as usize] =
                     shared::Cell::new_material(shared::Material::Sand);
             }
         }
@@ -249,8 +247,7 @@ impl Simulation {
         };
 
         Self {
-            sim_width,
-            sim_height,
+            sim_size: params.sim_size,
             input_buffer,
             output_buffer,
             // output_img_tex,
@@ -293,8 +290,8 @@ impl Simulation {
             }
 
             let tile = SIM_TILE_SIZE as f32;
-            let num_workgroups_x = (self.sim_width as f32 / tile).ceil() as u32;
-            let num_workgroups_y = (self.sim_height as f32 / tile).ceil() as u32;
+            let num_workgroups_x = (self.sim_size.x as f32 / tile).ceil() as u32;
+            let num_workgroups_y = (self.sim_size.y as f32 / tile).ceil() as u32;
             cpass.dispatch_workgroups(num_workgroups_x, num_workgroups_y, 1);
             if let Some((_ts_buffer, _ts_readback_buffer, ts_queries, _ts_period)) =
                 &self.timestamp_data
@@ -341,7 +338,6 @@ impl Simulation {
 
     /// Returns the most recent buffer thats been written to
     pub fn current_buffer(&self) -> &Buffer {
-        println!("{}", self.current_bind_group_a);
         if self.current_bind_group_a {
             &self.output_buffer
         } else {

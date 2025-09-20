@@ -21,18 +21,16 @@ pub fn main_fs(
 ) {
     let frag_coord = vec2(in_frag_coord.x, in_frag_coord.y);
     // Normalize to [0,1] range across the window
-    let uv = frag_coord / vec2(params.width as f32, params.height as f32);
+    let uv = frag_coord / params.window_size.as_vec2();
 
     // Scale into simulation space
-    let sim_x = (uv.x * params.sim_width as f32).floor() as u32;
-    let sim_y = (uv.y * params.sim_height as f32).floor() as u32;
+    let mut sim_pos = (uv * params.sim_size.as_vec2()).floor().as_uvec2();
 
     // Clamp to valid indices
-    let x = sim_x.min(params.sim_width - 1);
-    let y = sim_y.min(params.sim_height - 1);
+    sim_pos = sim_pos.min(params.sim_size - 1);
 
     // Fetch cell from 1D array
-    let idx = (y * params.sim_width + x) as usize;
+    let idx = (sim_pos.y * params.sim_size.x + sim_pos.x) as usize;
     let cell = sim_state[idx];
 
     // Output its color

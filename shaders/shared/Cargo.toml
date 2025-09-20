@@ -8,5 +8,5 @@ publish = false
 workspace = true
 
 [dependencies]
-spirv-std = { workspace = true }
+spirv-std = { workspace = true, features = ["bytemuck"] }
 bytemuck = { version = "1.23.2", features = ["derive"] }

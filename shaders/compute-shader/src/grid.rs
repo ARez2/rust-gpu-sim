@@ -1,6 +1,6 @@
 use core::ops::Rem;
 use shared::{
-    glam::{IVec2, USizeVec2},
+    glam::{IVec2, UVec2},
     *,
 };
 use spirv_std::macros::debug_printfln;
@@ -9,11 +9,11 @@ pub struct Grid<'a> {
     tile: &'a mut Tile,
     /// top left of the shared workgroup tile
     topleft: Pos,
-    sim_size: USizeVec2,
+    sim_size: UVec2,
 }
 #[allow(dead_code)]
 impl<'a> Grid<'a> {
-    pub fn new(tile: &'a mut Tile, topleft: Pos, sim_size: USizeVec2) -> Self {
+    pub fn new(tile: &'a mut Tile, topleft: Pos, sim_size: UVec2) -> Self {
         Self {
             tile,
             topleft,
@@ -40,7 +40,7 @@ impl<'a> Grid<'a> {
             let diff = cell_global_pos - cell_global_pos_clamped;
             let corrected = (local_clamp.as_ivec2() - diff)
                 .clamp(IVec2::ZERO, (SIM_TILE_SIZE_VEC - 1).as_ivec2());
-            corrected.as_usizevec2()
+            corrected.as_uvec2()
         }
     }
 
@@ -83,5 +83,9 @@ impl<'a> Grid<'a> {
             self.tile[to_idx] = self.tile[from_idx];
             self.tile[from_idx] = Cell::new_empty();
         }
+    }
+
+    pub fn set_cell(&mut self, pos: Pos, cell: Cell) {
+        self.tile[pos_to_idx(pos)] = cell;
     }
 }

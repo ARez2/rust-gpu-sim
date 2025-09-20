@@ -2,7 +2,10 @@ use std::{error::Error, time::Instant};
 
 use futures::executor::block_on;
 use ouroboros::self_referencing;
-use shared::{BIND_SHADER_PARAMS_WORKAROUND, Cell, ShaderParams};
+use shared::{
+    BIND_SHADER_PARAMS_WORKAROUND, Cell, ShaderParams,
+    glam::{USizeVec2, UVec2},
+};
 use wgpu::{
     BindGroup, Buffer, Device, InstanceDescriptor, ShaderModuleDescriptorPassthrough,
     util::DeviceExt,
@@ -195,6 +198,7 @@ impl Application {
             timestamping,
             emulate_push_constants_with_storage_buffer,
             spirv_passthrough,
+            &self.params,
             (ssbo_entry, &push_constants_ssbo_workaround),
         );
         if emulate_push_constants_with_storage_buffer {
@@ -223,7 +227,7 @@ impl Application {
         const CELL_SIZE: usize = std::mem::size_of::<Cell>();
         let display_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Display buffer"),
-            size: simulation.sim_width as u64 * simulation.sim_height as u64 * CELL_SIZE as u64,
+            size: self.params.sim_size.x as u64 * self.params.sim_size.y as u64 * CELL_SIZE as u64,
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -295,8 +299,7 @@ impl Application {
             self.push_constants_ssbo_workaround = Some(push_constants_ssbo_workaround);
         }
         self.start = web_time::Instant::now();
-        self.params.width = window_size.width;
-        self.params.height = window_size.height;
+        self.params.window_size = UVec2::new(window_size.width, window_size.height);
         self.simulation = Some(simulation);
         Ok(())
     }
@@ -309,8 +312,7 @@ impl Application {
 
         let window = window_surface.borrow_window();
         let current_size = window.inner_size();
-        self.params.width = current_size.width;
-        self.params.height = current_size.height;
+        self.params.window_size = UVec2::new(current_size.width, current_size.height);
         let surface = window_surface.borrow_surface();
         let device = self.device.as_ref().unwrap();
         let queue = self.queue.as_ref().unwrap();
@@ -358,15 +360,10 @@ impl Application {
                 1.0,
             );
             let time = self.start.elapsed().as_secs_f32();
-            for (i, press_time) in self.params.mouse_button_press_time.iter_mut().enumerate() {
-                if (self.mouse_button_press_since_last_frame & (1 << i)) != 0 {
-                    *press_time = time;
-                }
-            }
             self.params.time = time;
             self.params.frame += 1;
             self.mouse_button_press_since_last_frame = 0;
-            self.params.mouse_button_pressed = 0;
+            //self.params.mouse_button_pressed = 0;
             rpass.set_bind_group(0, self.bind_group.as_ref(), &[]);
             rpass.set_pipeline(self.render_pipeline.as_ref().unwrap());
 
@@ -415,27 +412,41 @@ impl ApplicationHandler for Application {
                 }
             }
             WindowEvent::CursorMoved { position, .. } => {
-                self.params.cursor_x = position.x as f32;
-                self.params.cursor_y = position.y as f32;
-                if self.params.mouse_button_pressed != 0 {
-                    self.params.drag_end_x = self.params.cursor_x;
-                    self.params.drag_end_y = self.params.cursor_y;
+                let scaled_x =
+                    (position.x / self.config.as_ref().unwrap().width as f64).clamp(0.0, 1.0);
+                let scaled_y =
+                    (position.y / self.config.as_ref().unwrap().height as f64).clamp(0.0, 1.0);
+                self.params.cursor = UVec2::new(
+                    (scaled_x * self.params.sim_size.x as f64) as u32,
+                    (scaled_y * self.params.sim_size.y as f64) as u32,
+                );
+                if self.params.mouse_button_pressed != shared::MouseButtonPressed::None {
+                    self.params.drag_end = self.params.cursor;
                 }
             }
             WindowEvent::MouseInput { state, button, .. } => {
+                self.params.mouse_button_pressed = match (state, button) {
+                    (ElementState::Released, _) => shared::MouseButtonPressed::None,
+                    (ElementState::Pressed, button) => match button {
+                        MouseButton::Left => shared::MouseButtonPressed::Left,
+                        MouseButton::Right => shared::MouseButtonPressed::Right,
+                        MouseButton::Middle => shared::MouseButtonPressed::Middle,
+                        _ => shared::MouseButtonPressed::Left,
+                    },
+                };
                 if button == MouseButton::Left {
-                    self.params.mouse_button_pressed = 1;
-                    self.params.drag_start_x = self.params.cursor_x;
-                    self.params.drag_start_y = self.params.cursor_y;
-                    self.params.drag_end_x = self.params.cursor_x;
-                    self.params.drag_end_y = self.params.cursor_y;
+                    self.params.drag_start = self.params.cursor;
+                    self.params.drag_end = self.params.cursor;
                     //if self.mouse_left_pressed {}
                 }
             }
             WindowEvent::MouseWheel { delta, .. } => {
                 if let winit::event::MouseScrollDelta::LineDelta(x, y) = delta {
-                    self.params.drag_end_x = x * 0.1;
-                    self.params.drag_end_y = y * 0.1;
+                    self.params.mouse_radius = self
+                        .params
+                        .mouse_radius
+                        .saturating_add_signed(y as i32)
+                        .max(1);
                 }
             }
             WindowEvent::KeyboardInput { event, .. } => {

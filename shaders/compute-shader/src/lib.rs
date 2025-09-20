@@ -37,27 +37,43 @@ fn cell_update(params: &ShaderParams, mut grid: Grid, _global_pos: Pos, pos: Pos
                 return;
             }
         }
-        let right_pos = get_pos(pos, Offset::Right);
-        if grid.clamp_pos(pos, right_pos) != right_pos {
-            return;
-        }
-        let left_pos = get_pos(pos, Offset::Left);
-        if grid.clamp_pos(pos, left_pos) != left_pos {
-            return;
-        }
-        let right = grid.get(right_pos);
-        let left = grid.get(left_pos);
 
-        let (diag_neigh_order, horiz_neigh_order) = if params.frame % 2 == 0 {
-            ([Offset::DownRight, Offset::DownLeft], [right, left])
+        let diag_neigh_order = if params.frame % 2 == 0 {
+            [Offset::DownRight, Offset::DownLeft]
         } else {
-            ([Offset::DownLeft, Offset::DownRight], [left, right])
+            [Offset::DownLeft, Offset::DownRight]
+        };
+        #[cfg(feature = "movable_solid_check_horizontal")]
+        let horiz_neigh_order = {
+            let right_pos = get_pos(pos, Offset::Right);
+            if grid.clamp_pos(pos, right_pos) != right_pos {
+                return;
+            }
+            let left_pos = get_pos(pos, Offset::Left);
+            if grid.clamp_pos(pos, left_pos) != left_pos {
+                return;
+            }
+            let right = grid.get(right_pos);
+            let left = grid.get(left_pos);
+
+            if params.frame % 2 == 0 {
+                [right, left]
+            } else {
+                [left, right]
+            }
         };
 
         let diag_pos = get_pos(pos, diag_neigh_order[0]);
         if grid.clamp_pos(pos, diag_pos) == diag_pos {
             let diag_neigh = grid.get(diag_pos);
-            if horiz_neigh_order[0].material.is_empty() && diag_neigh.material.is_empty() {
+
+            let mut extra_cond = true;
+            #[cfg(feature = "movable_solid_check_horizontal")]
+            {
+                extra_cond |= horiz_neigh_order[0].material.is_empty();
+            }
+
+            if extra_cond && diag_neigh.material.is_empty() {
                 grid.move_cell(pos, diag_pos, true);
                 return;
             }
@@ -65,7 +81,7 @@ fn cell_update(params: &ShaderParams, mut grid: Grid, _global_pos: Pos, pos: Pos
         let diag_pos = get_pos(pos, diag_neigh_order[1]);
         if grid.clamp_pos(pos, diag_pos) == diag_pos {
             let diag_neigh = grid.get(diag_pos);
-            if horiz_neigh_order[1].material.is_empty() && diag_neigh.material.is_empty() {
+            if diag_neigh.material.is_empty() {
                 grid.move_cell(pos, diag_pos, true);
                 return;
             }
@@ -90,35 +106,30 @@ pub fn main_cs(
     // ), // writable output image. Binding: BIND_SIM_OUTPUT_IMG
     #[spirv(workgroup)] shared: &mut Tile,
 ) {
-    let sim_size = USizeVec2::new(params.sim_width as usize, params.sim_height as usize);
-    let mut base_pos = wid.xy().as_usizevec2() * SIM_TILE_SIZE;
+    let sim_size = params.sim_size;
+    let mut base_pos = wid.xy() * SIM_TILE_SIZE;
 
     // Shift the grid each even frame to remove problems at tile borders
-    base_pos += (SIM_TILE_SIZE_VEC / 2) * (params.frame % 2) as usize;
+    base_pos += (SIM_TILE_SIZE_VEC / 2) * (params.frame % 2);
 
-    let local_pos = lid.xy().as_usizevec2();
+    let local_pos = lid.xy();
     let global_pos = (base_pos + local_pos).rem(sim_size);
-    let global_idx = global_pos.y * sim_size.x + global_pos.x;
-    let local_idx = local_pos.y * SIM_TILE_SIZE + local_pos.x;
+    let global_idx = (global_pos.y * sim_size.x + global_pos.x) as usize;
+    let local_idx = (local_pos.y * SIM_TILE_SIZE + local_pos.x) as usize;
 
     // init shared workgroup memory from global memory
     shared[local_idx] = input[global_idx];
-    if base_pos == Pos::new(496, 400) {
-        unsafe {
-            debug_printfln!(
-                "global: (%u, %u)  local: (%u %u)  grid: (%u, %u)",
-                global_pos.x as u32,
-                global_pos.y as u32,
-                local_pos.x as u32,
-                local_pos.y as u32,
-                base_pos.x as u32,
-                base_pos.y as u32,
-            )
-        };
-    }
     let grid_topleft = base_pos;
-    let grid = Grid::new(shared, grid_topleft, sim_size);
+    let mut grid = Grid::new(shared, grid_topleft, sim_size);
     spirv_std::arch::workgroup_memory_barrier_with_group_sync();
+
+    if params.mouse_button_pressed == MouseButtonPressed::Left {
+        let mouse_pos = params.cursor.as_ivec2();
+        let dist = global_pos.as_ivec2().distance_squared(mouse_pos);
+        if dist < (params.mouse_radius * params.mouse_radius) as i32 {
+            grid.set_cell(local_pos, Cell::new_material(Material::Sand));
+        }
+    }
 
     if params.time > 1.0 {
         cell_update(params, grid, global_pos, local_pos, local_idx);
