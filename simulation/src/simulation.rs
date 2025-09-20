@@ -1,16 +1,12 @@
 use std::time::Duration;
 
 use shared::{
-    BIND_SHADER_PARAMS_WORKAROUND, BIND_SIM_INPUT, BIND_SIM_OUTPUT, BIND_SIM_OUTPUT_IMG,
-    SIM_TILE_SIZE, ShaderParams,
+    BIND_SHADER_PARAMS_WORKAROUND, BIND_SIM_INPUT, BIND_SIM_OUTPUT, SIM_TILE_SIZE, ShaderParams,
 };
 use wgpu::{
-    BindGroup, BindGroupEntry, BindGroupLayout, BindGroupLayoutEntry, Buffer, ComputePipeline,
-    Device, PipelineLayout, PushConstantRange, QuerySet, Queue, Sampler,
-    ShaderModuleDescriptorPassthrough, Texture, TextureView, util::DeviceExt,
+    BindGroup, BindGroupLayout, BindGroupLayoutEntry, Buffer, ComputePipeline, Device,
+    PipelineLayout, QuerySet, Queue, ShaderModuleDescriptorPassthrough, util::DeviceExt,
 };
-
-use crate::{CompiledShaderModules, load_spirv_module};
 
 pub struct Simulation {
     pub sim_width: u32,
@@ -164,18 +160,12 @@ impl Simulation {
             shared::Cell::new_material(shared::Material::Empty);
             sim_width as usize * sim_height as usize
         ];
-        // for y in 100..150 {
-        for x in 0..400 {
-            input[(400 * sim_width + x) as usize] =
-                shared::Cell::new_material(shared::Material::Sand);
-        }
-        for y in 0..256 {
-            for x in 350..512 {
+        for y in 100..256 {
+            for x in 100..400 {
                 input[(y * sim_width + x) as usize] =
                     shared::Cell::new_material(shared::Material::Sand);
             }
         }
-
         let output = input.clone();
 
         let input_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -318,24 +308,6 @@ impl Simulation {
             encoder.resolve_query_set(ts_queries, 0..2, ts_buffer, 0);
             encoder.copy_buffer_to_buffer(ts_buffer, 0, ts_readback_buffer, 0, ts_buffer.size());
         }
-
-        // if self.current_bind_group_a {
-        //     encoder.copy_buffer_to_buffer(
-        //         &self.output_buffer,
-        //         0,
-        //         &self.input_buffer,
-        //         0,
-        //         self.output_buffer.size(),
-        //     );
-        // } else {
-        //     encoder.copy_buffer_to_buffer(
-        //         &self.input_buffer,
-        //         0,
-        //         &self.output_buffer,
-        //         0,
-        //         self.output_buffer.size(),
-        //     );
-        // }
 
         queue.submit(Some(encoder.finish()));
         if let Some((_ts_buffer, ts_readback_buffer, _ts_queries, _ts_period)) =

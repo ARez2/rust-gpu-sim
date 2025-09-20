@@ -5,7 +5,7 @@
 use core::f32::consts::PI;
 use glam::{Mat2, Vec2, Vec3, Vec4, Vec4Swizzles, vec2, vec3, vec4};
 use shared::*;
-use spirv_std::{macros::debug_printfln, spirv};
+use spirv_std::spirv;
 
 // Note: This cfg is incorrect on its surface, it really should be "are we compiling with std", but
 // we tie #[no_std] above to the same condition, so it's fine.
@@ -23,8 +23,6 @@ pub fn main_fs(
     // Normalize to [0,1] range across the window
     let uv = frag_coord / vec2(params.width as f32, params.height as f32);
 
-    let pos = 2.0 * uv - Vec2::ONE;
-
     // Scale into simulation space
     let sim_x = (uv.x * params.sim_width as f32).floor() as u32;
     let sim_y = (uv.y * params.sim_height as f32).floor() as u32;
@@ -39,16 +37,6 @@ pub fn main_fs(
 
     // Output its color
     *output = cell.material.color();
-    // if sim_x == 0 && sim_y == 400 {
-    //     if sim_state[idx].material == Material::Sand {
-    //         *output = vec4(1.0, 0.0, 0.0, 1.0);
-    //     }
-    // }
-    // if sim_state[(401 * params.sim_width + 0) as usize].material == Material::Sand {
-    //     *output = vec4(1.0, 0.0, 0.0, 1.0);
-    // }
-    //*output = Vec3::splat(idx as f32 / (sim_state.len()) as f32).extend(1.0);
-    // *output = vec4(pos.x, pos.y, 0.0, 1.0);
 }
 
 #[spirv(vertex)]

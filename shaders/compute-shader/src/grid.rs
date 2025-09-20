@@ -6,24 +6,18 @@ use shared::{
 use spirv_std::macros::debug_printfln;
 
 pub struct Grid<'a> {
-    pub tile: &'a mut Tile,
+    tile: &'a mut Tile,
     /// top left of the shared workgroup tile
-    pub global_pos: Pos,
+    topleft: Pos,
     sim_size: USizeVec2,
-    grid_shifted_this_frame: bool,
 }
+#[allow(dead_code)]
 impl<'a> Grid<'a> {
-    pub fn new(
-        tile: &'a mut Tile,
-        global_pos: Pos,
-        sim_size: USizeVec2,
-        grid_shifted_this_frame: bool,
-    ) -> Self {
+    pub fn new(tile: &'a mut Tile, topleft: Pos, sim_size: USizeVec2) -> Self {
         Self {
             tile,
-            global_pos,
+            topleft,
             sim_size,
-            grid_shifted_this_frame,
         }
     }
 
@@ -33,7 +27,7 @@ impl<'a> Grid<'a> {
 
         let delta = pos.as_ivec2() - own_pos.as_ivec2();
         let own_global_pos =
-            (self.global_pos.as_ivec2() + own_pos.as_ivec2()).rem_euclid(self.sim_size.as_ivec2());
+            (self.topleft.as_ivec2() + own_pos.as_ivec2()).rem_euclid(self.sim_size.as_ivec2());
         let cell_global_pos = own_global_pos + delta;
 
         let cell_global_pos_clamped =
