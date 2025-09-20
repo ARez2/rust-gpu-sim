@@ -2,8 +2,11 @@ use std::{error::Error, time::Instant};
 
 use futures::executor::block_on;
 use ouroboros::self_referencing;
-use shared::{BIND_SHADER_PARAMS_WORKAROUND, ShaderParams};
-use wgpu::{BindGroup, Buffer, Device, InstanceDescriptor, ShaderModuleDescriptorPassthrough};
+use shared::{BIND_SHADER_PARAMS_WORKAROUND, Cell, ShaderParams};
+use wgpu::{
+    BindGroup, Buffer, Device, InstanceDescriptor, ShaderModuleDescriptorPassthrough,
+    util::DeviceExt,
+};
 use winit::{
     application::ApplicationHandler,
     dpi::LogicalSize,
@@ -31,6 +34,7 @@ pub struct Application {
     render_pipeline: Option<wgpu::RenderPipeline>,
     shader_module: Option<wgpu::ShaderModule>,
     bind_group: Option<BindGroup>,
+    display_buffer: Option<Buffer>,
     push_constants_ssbo_workaround: Option<Buffer>,
     close_requested: bool,
     start: Instant,
@@ -48,6 +52,7 @@ impl Default for Application {
             render_pipeline: None,
             shader_module: None,
             bind_group: None,
+            display_buffer: None,
             push_constants_ssbo_workaround: None,
             close_requested: false,
             start: Instant::now(),
@@ -67,7 +72,7 @@ impl Application {
             .with_title("Rust GPU - wgpu")
             .with_inner_size(LogicalSize::new(512.0, 512.0));
         let window_box = event_loop.create_window(window_attributes)?;
-        let mut instance_flags = wgpu::InstanceFlags::default();
+        let instance_flags = wgpu::InstanceFlags::default();
         // Turn off validation as the shaders are trusted.
         //instance_flags.remove(wgpu::InstanceFlags::VALIDATION);
         // Disable debugging info to speed things up.
@@ -214,10 +219,19 @@ impl Application {
             label: None,
             entries: &bind_group_layout_entries,
         });
+
+        const CELL_SIZE: usize = std::mem::size_of::<Cell>();
+        let display_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Display buffer"),
+            size: simulation.sim_width as u64 * simulation.sim_height as u64 * CELL_SIZE as u64,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
         bind_group_entries.push(wgpu::BindGroupEntry {
             binding: 1,
-            resource: simulation.output_buffer.as_entire_binding(),
+            resource: display_buffer.as_entire_binding(),
         });
+
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: None,
             layout: &bind_group_layout,
@@ -276,6 +290,7 @@ impl Application {
         self.render_pipeline = Some(render_pipeline);
         self.shader_module = Some(shader_module);
         self.bind_group = Some(bind_group);
+        self.display_buffer = Some(display_buffer);
         if emulate_push_constants_with_storage_buffer {
             self.push_constants_ssbo_workaround = Some(push_constants_ssbo_workaround);
         }
@@ -302,7 +317,7 @@ impl Application {
         let frame = match surface.get_current_texture() {
             Ok(frame) => frame,
             Err(e) => {
-                eprintln!("Failed to acquire texture: {:?}", e);
+                eprintln!("Failed to acquire texture: {e:?}");
                 return;
             }
         };
@@ -311,6 +326,13 @@ impl Application {
             .create_view(&wgpu::TextureViewDescriptor::default());
         let mut encoder =
             device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+
+        if let Some(sim) = &self.simulation
+            && let Some(display) = &self.display_buffer
+        {
+            encoder.copy_buffer_to_buffer(sim.current_buffer(), 0, display, 0, display.size());
+        }
+
         {
             let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: None,
@@ -318,7 +340,7 @@ impl Application {
                     view: &view,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        load: wgpu::LoadOp::Clear(wgpu::Color::GREEN),
                         store: wgpu::StoreOp::Store,
                     },
                     depth_slice: None,

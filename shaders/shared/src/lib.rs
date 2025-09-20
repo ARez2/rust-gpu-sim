@@ -14,8 +14,8 @@ pub const BIND_SIM_OUTPUT_IMG: u32 = 3;
 pub const BIND_FRAG_TEX: u32 = 1;
 pub const BIND_FRAG_SAMPLER: u32 = 2;
 
-pub const SIM_TILE_SIZE: usize = 16;
-const TILE_SIZE_VEC: USizeVec2 = USizeVec2::new(SIM_TILE_SIZE, SIM_TILE_SIZE);
+pub const SIM_TILE_SIZE: usize = 32;
+pub const SIM_TILE_SIZE_VEC: USizeVec2 = USizeVec2::new(SIM_TILE_SIZE, SIM_TILE_SIZE);
 
 pub type Tile = [Cell; SIM_TILE_SIZE * SIM_TILE_SIZE];
 pub type Pos = USizeVec2;
@@ -38,18 +38,8 @@ pub fn pos_to_idx(pos: Pos) -> usize {
     pos.y * SIM_TILE_SIZE + pos.x
 }
 
-#[inline(always)]
-pub fn clamp_pos(pos: Pos) -> Pos {
-    // No need for >= 0 check since its unsigned
-    pos.min(TILE_SIZE_VEC - 1)
-}
-
-#[inline(always)]
-pub fn clamp_idx(idx: usize) -> usize {
-    idx.min(SIM_TILE_SIZE - 1 * SIM_TILE_SIZE + SIM_TILE_SIZE - 1)
-}
-
 #[repr(C)]
+#[derive(Debug, Clone, Copy)]
 pub enum Offset {
     Up,
     Left,
@@ -67,7 +57,7 @@ impl Offset {
             Self::Left => (-1, 0),
             Self::Right => (1, 0),
             Self::UpRight => (1, -1),
-            Self::DownRight => (1, -1),
+            Self::DownRight => (1, 1),
             Self::DownLeft => (-1, 1),
             Self::UpLeft => (-1, -1),
             Self::Down => (0, 1),
@@ -87,7 +77,7 @@ pub fn get_pos(mut pos: Pos, offset: Offset) -> Pos {
     } else {
         pos.y += y as usize;
     }
-    clamp_pos(pos)
+    pos
 }
 pub fn get_pos_custom(mut pos: Pos, x: i32, y: i32) -> Pos {
     if x < 0 {
@@ -100,5 +90,5 @@ pub fn get_pos_custom(mut pos: Pos, x: i32, y: i32) -> Pos {
     } else {
         pos.y += y as usize;
     }
-    clamp_pos(pos)
+    pos
 }

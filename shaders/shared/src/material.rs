@@ -6,6 +6,9 @@ pub enum Material {
     Undefined,
     Empty,
     Sand,
+    Red,
+    Green,
+    Blue,
 }
 impl Material {
     pub fn color(&self) -> Vec4 {
@@ -13,6 +16,13 @@ impl Material {
             Self::Undefined => vec4(1.0, 0.0, 1.0, 1.0),
             Self::Empty => vec4(0.0, 0.0, 0.0, 1.0),
             Self::Sand => vec4(1.0, 1.0, 0.0, 1.0),
+            Self::Red => vec4(1.0, 0.0, 0.0, 1.0),
+            Self::Green => vec4(0.0, 1.0, 0.0, 1.0),
+            Self::Blue => vec4(0.0, 0.0, 1.0, 1.0),
         }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        *self == Material::Empty
     }
 }

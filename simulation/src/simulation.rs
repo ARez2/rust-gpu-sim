@@ -13,10 +13,10 @@ use wgpu::{
 use crate::{CompiledShaderModules, load_spirv_module};
 
 pub struct Simulation {
-    sim_width: u32,
-    sim_height: u32,
+    pub sim_width: u32,
+    pub sim_height: u32,
     input_buffer: Buffer,
-    pub output_buffer: Buffer,
+    output_buffer: Buffer,
     // output_img_tex: Texture,
     // output_img_view: TextureView,
     // output_img_sampler: Sampler,
@@ -164,25 +164,33 @@ impl Simulation {
             shared::Cell::new_material(shared::Material::Empty);
             sim_width as usize * sim_height as usize
         ];
-        for y in (sim_height - 100)..(sim_height - 50) {
-            for x in (sim_width - 100)..(sim_width - 50) {
-                input[(100 * sim_width + x) as usize] =
+        // for y in 100..150 {
+        for x in 0..400 {
+            input[(400 * sim_width + x) as usize] =
+                shared::Cell::new_material(shared::Material::Sand);
+        }
+        for y in 0..256 {
+            for x in 350..512 {
+                input[(y * sim_width + x) as usize] =
                     shared::Cell::new_material(shared::Material::Sand);
             }
         }
+
         let output = input.clone();
 
         let input_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Input buffer"),
             contents: bytemuck::cast_slice(&input),
             usage: wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::COPY_DST
-                | wgpu::BufferUsages::COPY_SRC,
+                | wgpu::BufferUsages::COPY_SRC
+                | wgpu::BufferUsages::COPY_DST,
         });
         let output_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Output buffer"),
             contents: bytemuck::cast_slice(&output),
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_SRC
+                | wgpu::BufferUsages::COPY_DST,
         });
         assert_eq!(input_buffer.size(), output_buffer.size());
         // Create 2 bind groups to swap at runtime
@@ -311,6 +319,24 @@ impl Simulation {
             encoder.copy_buffer_to_buffer(ts_buffer, 0, ts_readback_buffer, 0, ts_buffer.size());
         }
 
+        // if self.current_bind_group_a {
+        //     encoder.copy_buffer_to_buffer(
+        //         &self.output_buffer,
+        //         0,
+        //         &self.input_buffer,
+        //         0,
+        //         self.output_buffer.size(),
+        //     );
+        // } else {
+        //     encoder.copy_buffer_to_buffer(
+        //         &self.input_buffer,
+        //         0,
+        //         &self.output_buffer,
+        //         0,
+        //         self.output_buffer.size(),
+        //     );
+        // }
+
         queue.submit(Some(encoder.finish()));
         if let Some((_ts_buffer, ts_readback_buffer, _ts_queries, _ts_period)) =
             &self.timestamp_data
@@ -338,6 +364,16 @@ impl Simulation {
             );
             drop(timing_data);
             ts_readback_buffer.unmap();
+        }
+    }
+
+    /// Returns the most recent buffer thats been written to
+    pub fn current_buffer(&self) -> &Buffer {
+        println!("{}", self.current_bind_group_a);
+        if self.current_bind_group_a {
+            &self.output_buffer
+        } else {
+            &self.input_buffer
         }
     }
 }

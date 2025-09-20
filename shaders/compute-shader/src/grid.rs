@@ -1,23 +1,53 @@
-use shared::*;
+use core::ops::Rem;
+use shared::{
+    glam::{IVec2, USizeVec2},
+    *,
+};
+use spirv_std::macros::debug_printfln;
 
 pub struct Grid<'a> {
     pub tile: &'a mut Tile,
+    /// top left of the shared workgroup tile
+    pub global_pos: Pos,
+    sim_size: USizeVec2,
+    grid_shifted_this_frame: bool,
 }
 impl<'a> Grid<'a> {
-    pub fn new(tile: &'a mut Tile) -> Self {
-        Self { tile }
+    pub fn new(
+        tile: &'a mut Tile,
+        global_pos: Pos,
+        sim_size: USizeVec2,
+        grid_shifted_this_frame: bool,
+    ) -> Self {
+        Self {
+            tile,
+            global_pos,
+            sim_size,
+            grid_shifted_this_frame,
+        }
     }
 
     #[inline(always)]
-    pub fn pos_valid(&self, pos: Pos) -> bool {
-        let clamped = clamp_pos(pos);
-        clamped == pos
-    }
+    pub fn clamp_pos(&self, own_pos: Pos, pos: Pos) -> Pos {
+        let local_clamp = pos.min(SIM_TILE_SIZE_VEC - 1);
 
-    #[inline(always)]
-    pub fn idx_valid(&self, idx: usize) -> bool {
-        let clamped = clamp_idx(idx);
-        clamped == idx
+        let delta = pos.as_ivec2() - own_pos.as_ivec2();
+        let own_global_pos =
+            (self.global_pos.as_ivec2() + own_pos.as_ivec2()).rem_euclid(self.sim_size.as_ivec2());
+        let cell_global_pos = own_global_pos + delta;
+
+        let cell_global_pos_clamped =
+            cell_global_pos.clamp(IVec2::ZERO, (self.sim_size - 1).as_ivec2());
+
+        if cell_global_pos_clamped == cell_global_pos {
+            local_clamp
+        } else {
+            // Compute correction in signed space, then clamp to [0, TILE-1]
+            let diff = cell_global_pos - cell_global_pos_clamped;
+            let corrected = (local_clamp.as_ivec2() - diff)
+                .clamp(IVec2::ZERO, (SIM_TILE_SIZE_VEC - 1).as_ivec2());
+            corrected.as_usizevec2()
+        }
     }
 
     /// Returns a reference to a cell in the grid without validity checks.
@@ -41,6 +71,7 @@ impl<'a> Grid<'a> {
     /// Moves a [`Cell`] from_pos to_pos. If swap == true, it will swap with the target
     /// position, instead of replacing it. This is faster and can be used for empty target cells.
     pub fn move_cell(&mut self, from_pos: Pos, mut to_pos: Pos, swap: bool) {
+        // spirv_std::arch::workgroup_memory_barrier();
         if from_pos == to_pos {
             return;
         }
