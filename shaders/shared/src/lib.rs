@@ -20,8 +20,18 @@ pub const SIM_TILE_SIZE_VEC: UVec2 = UVec2::new(SIM_TILE_SIZE, SIM_TILE_SIZE);
 pub type Tile = [Cell; SIM_TILE_SIZE as usize * SIM_TILE_SIZE as usize];
 pub type Pos = UVec2;
 
+mod hash;
+pub use hash::*;
 mod helpers;
 pub use helpers::*;
+
+pub mod buffer_struct;
+pub use bufferstruct_derive::{BufferStruct, BufferStructPlain};
+
+pub mod __private {
+    pub use bytemuck;
+    pub use bytemuck_derive;
+}
 
 mod params;
 pub use params::*;
