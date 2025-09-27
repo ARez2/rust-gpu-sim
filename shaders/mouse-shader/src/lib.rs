@@ -57,6 +57,9 @@ pub fn main_fs(
 
     // Output its color
     *output = cell.material.color();
+    if cell.material.is_empty() && (cell.color.0 > 0.0 || cell.color.1 > 0.0) {
+        *output = vec4(1.0, 0.0, 0.0, 1.0);
+    }
 }
 
 #[spirv(vertex)]

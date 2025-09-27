@@ -26,3 +26,8 @@ impl Material {
         *self == Material::Empty
     }
 }
+impl Default for Material {
+    fn default() -> Self {
+        Self::Empty
+    }
+}

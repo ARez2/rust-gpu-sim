@@ -126,11 +126,20 @@ pub fn main_cs(
     let mut grid = Grid::new(shared, grid_topleft, sim_size);
     spirv_std::arch::workgroup_memory_barrier_with_group_sync();
 
-    if params.mouse_button_pressed == MouseButtonPressed::Left {
+    if params.mouse_button_pressed != MouseButtonPressed::None {
         let mouse_pos = params.cursor.as_ivec2();
         let dist = global_pos.as_ivec2().distance_squared(mouse_pos);
         if dist < (params.mouse_radius * params.mouse_radius) as i32 {
-            grid.set_cell(local_pos, Cell::new_material(Material::Sand));
+            let mut new = if params.mouse_button_pressed == MouseButtonPressed::Left {
+                Cell::new_material(Material::Sand)
+            } else {
+                Cell::new_material(Material::Empty)
+            };
+            if new.material == Material::Sand {
+                new.color.0 = 3.0;
+                new.color.1 = 6.0;
+            }
+            grid.set_cell(local_pos, new);
         }
     }
 
